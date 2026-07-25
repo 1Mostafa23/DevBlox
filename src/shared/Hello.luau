@@ -1,3 +1,3 @@
 return function()
-	print("I am nigga")
+	print("Vova is a ludik!")
 end
