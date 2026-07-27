@@ -12,22 +12,38 @@ local RemotesFolder = Shared:WaitForChild("Remotes")
 local RequestRoll = RemotesFolder:WaitForChild("RequestRoll") :: RemoteFunction
 local ResolveRoll = RemotesFolder:WaitForChild("ResolveRoll") :: RemoteEvent
 local InventoryService = require(script.Parent.Parent.Data.InventoryService)
+local PreviewSpawner = require(script.Parent.PreviewSpawner)
+local ProximityPromptService = game:GetService("ProximityPromptService")
 
 -- Per-player state.
 local pendingRoll: { [Player]: string } = {}   -- player -> rolled unit Id awaiting resolve
 local isRolling: { [Player]: boolean } = {}     -- true while a roll is being processed
 local rng = Random.new()
 
+-- Claim via the NPC's own prompt.
+ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
+	if prompt.Name ~= "ClaimPrompt" then return end
+	local unitId = pendingRoll[player]
+	if not unitId then return end
+	pendingRoll[player] = nil
+	PreviewSpawner.Clear()
+	InventoryService.AddUnit(player, unitId)
+end)
+
 -- Client asks to roll. Server decides.
 RequestRoll.OnServerInvoke = function(player: Player)
 	-- Reject if a roll is mid-flight OR there's an unresolved result.
-	if isRolling[player] or pendingRoll[player] then
+	if isRolling[player] then
 		return { ok = false, reason = "busy" }
 	end
 
-	isRolling[player] = true
+	-- If there's an unclaimed preview, rerolling discards it.
+	if pendingRoll[player] then
+		pendingRoll[player] = nil
+		PreviewSpawner.Clear()
+	end
 
-	-- (Roll cost / cooldown would be validated here later.)
+	isRolling[player] = true
 
 	local unit = RollService.RollOne(rng)
 	isRolling[player] = nil
@@ -37,6 +53,7 @@ RequestRoll.OnServerInvoke = function(player: Player)
 	end
 
 	pendingRoll[player] = unit.Id
+	PreviewSpawner.Show(unit.Id)
 	return { ok = true, unitId = unit.Id }
 end
 
@@ -46,6 +63,7 @@ ResolveRoll.OnServerEvent:Connect(function(player: Player, action: string)
 	if not unitId then return end -- nothing to resolve; ignore
 
 	pendingRoll[player] = nil
+	PreviewSpawner.Clear()
 
 	if action == "claim" then
 		InventoryService.AddUnit(player, unitId)

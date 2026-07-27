@@ -1,21 +1,23 @@
 --!strict
--- client/AltarInput.client.luau  (→ StarterPlayerScripts/AltarInput)
+-- client/AltarInput.client.luau
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RollController = require(script.Parent:WaitForChild("RollController"))
-
 local player = Players.LocalPlayer
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local RemotesFolder = Shared:WaitForChild("Remotes")
-local ResolveRoll = RemotesFolder:WaitForChild("ResolveRoll") :: RemoteEvent
+
+local function isInAltar(prompt: Instance): boolean
+	local node = prompt.Parent
+	while node do
+		if node.Name == "SummonAltar" then return true end
+		node = node.Parent
+	end
+	return false
+end
 
 ProximityPromptService.PromptTriggered:Connect(function(prompt, plr)
 	if plr ~= player then return end
-	if prompt.Parent and prompt.Parent.Name == "SummonAltar" then
+	if isInAltar(prompt) then
 		RollController.Roll()
-		task.wait(0.1)
-		ResolveRoll:FireServer("discard") -- step 2 only: clear pending so we can re-roll
 	end
 end)
