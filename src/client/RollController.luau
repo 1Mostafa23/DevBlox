@@ -1,5 +1,5 @@
 --!strict
--- StarterPlayer/StarterPlayerScripts/Client/RollController.luau
+-- client/RollController.luau  (→ StarterPlayerScripts/RollController)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -28,7 +28,7 @@ function RollController.Roll()
 	local unit = UnitDatabase.GetById(result.unitId)
 	print("Rolled:", unit.DisplayName, "(" .. unit.Rarity .. ")")
 
-	busy = false
+	busy = false  -- step 2 only; changes when we add claim/reroll
 end
 
 return RollController

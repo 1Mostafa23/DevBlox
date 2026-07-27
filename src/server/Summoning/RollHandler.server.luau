@@ -1,23 +1,17 @@
 --!strict
 -- ServerScriptService/Summoning/RollHandler.luau
 --!strict
-print(">>> RollHandler STARTING")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-print(">>> got Shared")
 local RollService = require(script.Parent.RollService)
-print(">>> got RollService")
 
 require(Shared.Remotes)
-print(">>> required Remotes")
 local RemotesFolder = Shared:WaitForChild("Remotes")
-print(">>> got RemotesFolder")
 local RequestRoll = RemotesFolder:WaitForChild("RequestRoll") :: RemoteFunction
-print(">>> got RequestRoll")
 local ResolveRoll = RemotesFolder:WaitForChild("ResolveRoll") :: RemoteEvent
-print(">>> got ResolveRoll - ALL GOOD")
+local InventoryService = require(script.Parent.Parent.Data.InventoryService)
 
 -- Per-player state.
 local pendingRoll: { [Player]: string } = {}   -- player -> rolled unit Id awaiting resolve
@@ -54,11 +48,7 @@ ResolveRoll.OnServerEvent:Connect(function(player: Player, action: string)
 	pendingRoll[player] = nil
 
 	if action == "claim" then
-		-- TODO: if claiming should cost currency, validate + deduct HERE,
-		-- and if the player can't afford it, you could re-set pendingRoll[player] = unitId
-		-- so they don't lose the roll. For now, claiming is free.
-		-- InventoryService.AddUnit(player, unitId)  <- we'll wire this next
-		print(player.Name .. " claimed " .. unitId)
+		InventoryService.AddUnit(player, unitId)
 	end
 	-- "discard" (or anything else) just clears it; next roll is now allowed.
 end)
