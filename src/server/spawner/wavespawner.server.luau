@@ -1,0 +1,5 @@
+print("wavespawner started")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local workspace = game:GetService("Workspace")
+local map = workspace:WaitForChild("Map")
+print("i see", map)
