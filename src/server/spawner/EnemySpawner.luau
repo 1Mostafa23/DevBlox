@@ -1,11 +1,14 @@
 --!strict
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local enemyInstance = ReplicatedStorage:WaitForChild("Enemies"):WaitForChild("enemy")
-assert(enemyInstance:IsA("Model"), "ReplicatedStorage.Enemies.enemy must be a Model")
-local enemyModel = enemyInstance
+local EnemyPool = require(script.Parent.EnemyPool)
+local CharacterCollisionService =
+	require(script.Parent.Parent.collisions.CharacterCollisionService)
+local EnemyCollisionService = require(script.Parent.Parent.collisions.EnemyCollisionService)
+local EnemyFollowService = require(script.Parent.Parent.enemies.EnemyFollowService)
+
+CharacterCollisionService.Setup()
 
 local spawnPointsFolder = Workspace:WaitForChild("Map"):WaitForChild("SpawnPoints")
 local spawnPoints: { BasePart } = {}
@@ -62,25 +65,11 @@ end
 
 function EnemySpawner.Spawn(): Model
 	local spawnPoint = chooseSpawnPoint()
-	local enemy = enemyModel:Clone()
+	local enemy = EnemyPool.Acquire("enemy")
 
-	enemy.Parent = activeEnemiesFolder
+	EnemyCollisionService.RegisterEnemy(enemy)
 	enemy:PivotTo(spawnPoint.CFrame)
-
-	-- TEMPORARY TEST CODE START: Automatically kill spawned enemies after 5 seconds.
-	task.spawn(function()
-		task.wait(5)
-
-		if enemy.Parent == nil then
-			return
-		end
-
-		local humanoid = enemy:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.Health = 0
-		end
-	end)
-	-- TEMPORARY TEST CODE END
+	EnemyFollowService.Register(enemy)
 
 	return enemy
 end
