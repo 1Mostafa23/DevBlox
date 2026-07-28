@@ -8,10 +8,12 @@ local UPDATE_INTERVAL = 0.2
 local ACTIVE_WALK_SPEED = 10
 local STOP_DISTANCE = 6
 local RESUME_DISTANCE = 7
+local RUN_DISTANCE_THRESHOLD = 1
 local MIN_OFFSET_RADIUS = 4.5
 local MAX_OFFSET_RADIUS = 7
-local TURN_SPEED = math.rad(240)
-local MIN_TURN_ANGLE = math.rad(1)
+local TURN_RESPONSIVENESS = 4
+local MAX_TURN_SPEED = math.rad(90)
+local MAX_ENGAGED_MOVEMENT_SPEED = 0.5
 
 type MovementState = "Chasing" | "Engaged"
 
@@ -21,6 +23,9 @@ type Registration = {
 	state: MovementState,
 	target: BasePart?,
 	offset: Vector3?,
+	facingAttachment: Attachment,
+	facingAlignment: AlignOrientation,
+	runTrack: AnimationTrack?,
 }
 
 local activeEnemiesFolder = Workspace:WaitForChild("ActiveEnemies")
@@ -29,15 +34,44 @@ local rng = Random.new()
 
 local EnemyFollowService = {}
 
+local function stopRunTrack(registration: Registration)
+	local runTrack = registration.runTrack
+	if runTrack and runTrack.IsPlaying then
+		runTrack:Stop(0.1)
+	end
+end
+
+local function playRunTrack(registration: Registration)
+	local runTrack = registration.runTrack
+	if runTrack and not runTrack.IsPlaying then
+		runTrack:Play(0.1)
+	end
+end
+
 local function setMovementState(registration: Registration, state: MovementState)
 	if registration.state == state then
 		return
 	end
 
 	registration.state = state
-	registration.humanoid.AutoRotate = state == "Chasing"
 	if state == "Engaged" then
 		registration.humanoid:Move(Vector3.zero)
+		registration.humanoid.AutoRotate = false
+		stopRunTrack(registration)
+	else
+		registration.facingAlignment.Enabled = false
+		registration.humanoid.AutoRotate = true
+	end
+end
+
+local function updateEngagedFacing(registration: Registration, target: BasePart)
+	local direction = Vector3.new(
+		target.Position.X - registration.rootPart.Position.X,
+		0,
+		target.Position.Z - registration.rootPart.Position.Z
+	)
+	if direction.Magnitude > 0.001 then
+		registration.facingAlignment.CFrame = CFrame.lookAt(Vector3.zero, direction)
 	end
 end
 
@@ -101,6 +135,33 @@ function EnemyFollowService.Register(enemy: Model)
 		return
 	end
 
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	local animate = enemy:FindFirstChild("Animate")
+	local run = if animate then animate:FindFirstChild("run") else nil
+	local runAnimation = if run then run:FindFirstChild("RunAnim") else nil
+	if not animator or not runAnimation or not runAnimation:IsA("Animation") then
+		return
+	end
+
+	local runTrack = animator:LoadAnimation(runAnimation)
+	runTrack.Looped = true
+	runTrack.Priority = Enum.AnimationPriority.Movement
+
+	local facingAttachment = Instance.new("Attachment")
+	facingAttachment.Name = "EnemyFacingAttachment"
+	facingAttachment.Parent = rootPart
+
+	local facingAlignment = Instance.new("AlignOrientation")
+	facingAlignment.Name = "EnemyFacingAlignment"
+	facingAlignment.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	facingAlignment.Attachment0 = facingAttachment
+	facingAlignment.RigidityEnabled = false
+	facingAlignment.Responsiveness = TURN_RESPONSIVENESS
+	facingAlignment.MaxAngularVelocity = MAX_TURN_SPEED
+	facingAlignment.MaxTorque = math.huge
+	facingAlignment.Enabled = false
+	facingAlignment.Parent = rootPart
+
 	humanoid.WalkSpeed = ACTIVE_WALK_SPEED
 	humanoid.AutoRotate = true
 	registrations[enemy] = {
@@ -109,6 +170,9 @@ function EnemyFollowService.Register(enemy: Model)
 		state = "Chasing",
 		target = nil,
 		offset = nil,
+		facingAttachment = facingAttachment,
+		facingAlignment = facingAlignment,
+		runTrack = runTrack,
 	}
 end
 
@@ -118,16 +182,23 @@ function EnemyFollowService.Unregister(enemy: Model)
 		return
 	end
 
+	stopRunTrack(registration)
+	local runTrack = registration.runTrack
+	if runTrack then
+		runTrack:Destroy()
+		registration.runTrack = nil
+	end
+
 	registration.humanoid:Move(Vector3.zero)
 	registration.humanoid.AutoRotate = true
 	registration.target = nil
 	registration.offset = nil
+	registration.facingAlignment:Destroy()
+	registration.facingAttachment:Destroy()
 	registrations[enemy] = nil
 end
 
-RunService.Heartbeat:Connect(function(deltaTime: number)
-	local maxTurn = TURN_SPEED * deltaTime
-
+RunService.Heartbeat:Connect(function()
 	for enemy, registration in registrations do
 		local target = registration.target
 		if registration.state ~= "Engaged"
@@ -135,37 +206,19 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 			or enemy:GetAttribute("PoolActive") ~= true
 			or target.Parent == nil
 		then
+			registration.facingAlignment.Enabled = false
 			continue
 		end
 
-		local rootPart = registration.rootPart
-		local desiredDirection = Vector3.new(
-			target.Position.X - rootPart.Position.X,
-			0,
-			target.Position.Z - rootPart.Position.Z
-		)
-		local currentDirection = Vector3.new(
-			rootPart.CFrame.LookVector.X,
-			0,
-			rootPart.CFrame.LookVector.Z
-		)
-		if desiredDirection.Magnitude <= 0.001 or currentDirection.Magnitude <= 0.001 then
+		local velocity = registration.rootPart.AssemblyLinearVelocity
+		local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+		if horizontalSpeed > MAX_ENGAGED_MOVEMENT_SPEED then
+			registration.facingAlignment.Enabled = false
 			continue
 		end
 
-		local currentYaw = math.atan2(-currentDirection.X, -currentDirection.Z)
-		local desiredYaw = math.atan2(-desiredDirection.X, -desiredDirection.Z)
-		local yawDifference = math.atan2(
-			math.sin(desiredYaw - currentYaw),
-			math.cos(desiredYaw - currentYaw)
-		)
-		if math.abs(yawDifference) < MIN_TURN_ANGLE then
-			continue
-		end
-
-		local nextYaw = currentYaw + math.clamp(yawDifference, -maxTurn, maxTurn)
-		local nextDirection = Vector3.new(-math.sin(nextYaw), 0, -math.cos(nextYaw))
-		rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + nextDirection)
+		updateEngagedFacing(registration, target)
+		registration.facingAlignment.Enabled = true
 	end
 end)
 
@@ -189,6 +242,7 @@ task.spawn(function()
 			setTarget(registration, target)
 			if not target then
 				setMovementState(registration, "Chasing")
+				stopRunTrack(registration)
 				humanoid:Move(Vector3.zero)
 				continue
 			end
@@ -207,7 +261,24 @@ task.spawn(function()
 
 			local offset = registration.offset
 			if offset then
-				humanoid:MoveTo(target.Position + offset)
+				local movePosition = target.Position + offset
+				humanoid:MoveTo(movePosition)
+
+				local toDestination = Vector3.new(
+					movePosition.X - rootPart.Position.X,
+					0,
+					movePosition.Z - rootPart.Position.Z
+				)
+				if registration.state == "Chasing"
+					and target.Parent ~= nil
+					and toDestination.Magnitude > RUN_DISTANCE_THRESHOLD
+				then
+					playRunTrack(registration)
+				else
+					stopRunTrack(registration)
+				end
+			else
+				stopRunTrack(registration)
 			end
 		end
 
