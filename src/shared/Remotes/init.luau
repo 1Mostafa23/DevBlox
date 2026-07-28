@@ -15,6 +15,7 @@ end
 if RunService:IsServer() then
 	ensure("RemoteFunction", "RequestRoll")
 	ensure("RemoteEvent", "ResolveRoll")
+	ensure("RemoteFunction", "GetInventory")
 end
 
 return {}

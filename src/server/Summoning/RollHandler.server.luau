@@ -1,6 +1,5 @@
 --!strict
--- ServerScriptService/Summoning/RollHandler.luau
---!strict
+-- ServerScriptService/Server/Summoning/RollHandler.luau
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
@@ -19,6 +18,8 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local pendingRoll: { [Player]: string } = {}   -- player -> rolled unit Id awaiting resolve
 local isRolling: { [Player]: boolean } = {}     -- true while a roll is being processed
 local rng = Random.new()
+local lastRoll: { [Player]: number } = {}       -- last roll time per player
+local ROLL_COOLDOWN = 2.1
 
 -- Claim via the NPC's own prompt.
 ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
@@ -32,7 +33,14 @@ end)
 
 -- Client asks to roll. Server decides.
 RequestRoll.OnServerInvoke = function(player: Player)
-	-- Reject if a roll is mid-flight OR there's an unresolved result.
+	-- Server-side cooldown (authoritative; client can't bypass).
+	local now = os.clock()
+	local last = lastRoll[player]
+	if last and (now - last) < ROLL_COOLDOWN then
+		return { ok = false, reason = "cooldown" }
+	end
+
+	-- Reject if a roll is mid-flight.
 	if isRolling[player] then
 		return { ok = false, reason = "busy" }
 	end
@@ -52,8 +60,16 @@ RequestRoll.OnServerInvoke = function(player: Player)
 		return { ok = false, reason = "no_units" }
 	end
 
+	-- Roll succeeded — start the cooldown now.
+	lastRoll[player] = now
+
 	pendingRoll[player] = unit.Id
-	PreviewSpawner.Show(unit.Id)
+	-- Delay the real spawn to coincide with the end of the client spin (~2s).
+	task.delay(2, function()
+		if pendingRoll[player] == unit.Id then
+			PreviewSpawner.Show(unit.Id)
+		end
+	end)
 	return { ok = true, unitId = unit.Id }
 end
 
@@ -75,4 +91,5 @@ end)
 Players.PlayerRemoving:Connect(function(player)
 	pendingRoll[player] = nil
 	isRolling[player] = nil
+	lastRoll[player] = nil
 end)

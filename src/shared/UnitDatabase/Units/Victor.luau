@@ -13,4 +13,5 @@ return {
 	ModelName = "Victor",    -- name of model in ServerStorage/UnitModels
 	-- optional per-unit weight override; nil = use rarity weight
 	WeightOverride = nil,
+	Image = nil,
 }
