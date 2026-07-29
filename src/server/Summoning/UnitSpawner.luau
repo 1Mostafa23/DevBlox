@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UnitDatabase = require(Shared.UnitDatabase)
 local RarityConfig = require(Shared.RarityConfig)
+local UnitCollisionService = require(script.Parent.Parent.collisions.UnitCollisionService)
 
 local UnitModels = ServerStorage:WaitForChild("UnitModels")
 
@@ -18,21 +19,10 @@ if not deployedFolder then
 	deployedFolder.Parent = Workspace
 end
 
-local UNIT_GROUP = "DeployedUnits"
-
 local UnitSpawner = {}
 
 -- Track deployed unit models by player + instanceId so we can remove/update them.
 local deployed: { [Player]: { [string]: Model } } = {}
-
--- Assigns every part to the deployed-unit collision group.
-local function disableCollision(model: Model)
-	for _, desc in model:GetDescendants() do
-		if desc:IsA("BasePart") then
-			desc.CollisionGroup = UNIT_GROUP
-		end
-	end
-end
 
 local function makeLabel(model: Model, config)
 	local rarity = RarityConfig[config.Rarity]
@@ -93,7 +83,7 @@ function UnitSpawner.Spawn(player: Player, instanceId: string, unitId: string, p
 	model:SetAttribute("UnitId", unitId)   -- ADD THIS
 
 	-- Set collision group AFTER parenting so the Humanoid can't override it.
-	disableCollision(model)
+	UnitCollisionService.RegisterUnit(model)
 
 	deployed[player] = deployed[player] or {}
 	deployed[player][instanceId] = model
