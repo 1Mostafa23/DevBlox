@@ -4,6 +4,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local EnemyConfig = require(Shared:WaitForChild("EnemyConfig"))
+
 local PREWARM_COUNT = 15
 
 type PartDefaults = {
@@ -15,7 +18,6 @@ type PartDefaults = {
 }
 
 type ModelDefaults = {
-	maxHealth: number,
 	parts: { [BasePart]: PartDefaults },
 	visualTransparency: { [Instance]: number },
 }
@@ -55,8 +57,17 @@ local function getHumanoid(model: Model): Humanoid
 	return humanoid
 end
 
-local function captureDefaults(model: Model): ModelDefaults
+local function applyStats(model: Model, enemyId: string)
+	local stats = EnemyConfig[enemyId]
+	assert(stats, `Unknown EnemyId "{enemyId}"`)
+
 	local humanoid = getHumanoid(model)
+	humanoid.MaxHealth = stats.MaxHealth
+	humanoid.Health = stats.MaxHealth
+	humanoid.WalkSpeed = stats.WalkSpeed
+end
+
+local function captureDefaults(model: Model): ModelDefaults
 	local parts: { [BasePart]: PartDefaults } = {}
 	local visualTransparency: { [Instance]: number } = {}
 
@@ -75,7 +86,6 @@ local function captureDefaults(model: Model): ModelDefaults
 	end
 
 	return {
-		maxHealth = humanoid.MaxHealth,
 		parts = parts,
 		visualTransparency = visualTransparency,
 	}
@@ -118,6 +128,7 @@ end
 
 local function createModel(enemyType: string, pool: Pool): Model
 	local model = pool.template:Clone()
+	applyStats(model, enemyType)
 	model:SetAttribute("EnemyType", enemyType)
 	enemyTypes[model] = enemyType
 	defaultsByModel[model] = captureDefaults(model)
@@ -142,6 +153,7 @@ end
 
 local function register(enemyType: string, template: Model, prewarmCount: number)
 	assert(pools[enemyType] == nil, `Enemy type "{enemyType}" is already registered`)
+	assert(EnemyConfig[enemyType], `Unknown EnemyId "{enemyType}"`)
 
 	local pool: Pool = {
 		template = template,
@@ -161,6 +173,9 @@ function EnemyPool.Register(enemyType: string, template: Model, prewarmCount: nu
 end
 
 function EnemyPool.Acquire(enemyType: string): Model
+	local stats = EnemyConfig[enemyType]
+	assert(stats, `Unknown EnemyId "{enemyType}"`)
+
 	local pool = pools[enemyType]
 	assert(pool, `Unknown enemy type "{enemyType}"`)
 
@@ -191,8 +206,9 @@ function EnemyPool.Acquire(enemyType: string): Model
 	model:SetAttribute("PoolActive", true)
 
 	local humanoid = getHumanoid(model)
-	humanoid.MaxHealth = defaults.maxHealth
-	humanoid.Health = defaults.maxHealth
+	humanoid.MaxHealth = stats.MaxHealth
+	humanoid.Health = stats.MaxHealth
+	humanoid.WalkSpeed = stats.WalkSpeed
 	humanoid.PlatformStand = false
 	humanoid.Sit = false
 
