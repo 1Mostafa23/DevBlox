@@ -17,6 +17,8 @@ if RunService:IsServer() then
 	ensure("RemoteEvent", "ResolveRoll")
 	ensure("RemoteFunction", "GetInventory")
 	ensure("RemoteEvent", "RequestAttack")
+	ensure("RemoteFunction", "DeployUnit")   -- NEW
+	ensure("RemoteFunction", "ReturnUnit")   -- NEW
 end
 
 return {}

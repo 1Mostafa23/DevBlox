@@ -355,6 +355,20 @@ local function makeCard(entry: any, layoutOrder: number)
 	footerTextConstraint.MinTextSize = 10
 	footerTextConstraint.MaxTextSize = 16
 	footerTextConstraint.Parent = footer
+
+	-- Make the card tappable to start placement.
+	local clickBtn = Instance.new("TextButton")
+	clickBtn.Size = UDim2.fromScale(1, 1)
+	clickBtn.BackgroundTransparency = 1
+	clickBtn.Text = ""
+	clickBtn.ZIndex = 10
+	clickBtn.Parent = card
+	clickBtn.MouseButton1Click:Connect(function()
+		-- fire the placement controller with this unit
+		local PlacementController = require(script.Parent:WaitForChild("PlacementController"))
+		panel.Visible = false  -- close inventory (adjust to your panel's variable)
+		PlacementController.Begin(entry.instanceId, config.ModelName)
+	end)
 end
 
 -- =========================================================
