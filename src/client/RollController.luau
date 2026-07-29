@@ -3,7 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local UnitDatabase = require(Shared.UnitDatabase)  -- ADDED: need this to look up the rolled unit
+local UnitDatabase = require(Shared.UnitDatabase)
 require(Shared.Remotes)
 local RemotesFolder = Shared:WaitForChild("Remotes")
 local RequestRoll = RemotesFolder:WaitForChild("RequestRoll") :: RemoteFunction
@@ -11,28 +11,33 @@ local RequestRoll = RemotesFolder:WaitForChild("RequestRoll") :: RemoteFunction
 local RollController = {}
 local cooldown = false
 
--- ADDED: local event so the spin script can react to a roll.
+-- Local event so the spin script can react to a roll.
 local RollEvent = Instance.new("BindableEvent")
 RollController.RolledSignal = RollEvent.Event
 
+-- Signal fired when a roll is rejected (e.g. cooldown, busy).
+local RejectEvent = Instance.new("BindableEvent")
+RollController.RejectedSignal = RejectEvent.Event
+
 function RollController.Roll()
-	if cooldown then return end
+	if cooldown then RejectEvent:Fire("cooldown") return end
 	cooldown = true
 
 	local result = RequestRoll:InvokeServer()
 	if not result.ok then
 		warn("Roll rejected: " .. tostring(result.reason))
-		cooldown = false          -- ADDED: release cooldown on rejection so it isn't stuck
-		return                    -- ADDED: stop here on a failed roll
+		RejectEvent:Fire(result.reason)
+		cooldown = false
+		return
 	end
 
-	-- ADDED: look up the rolled unit and announce it so RollSpin can play the spin.
+	-- Look up the rolled unit and announce it so RollSpin can play the spin.
 	local unit = UnitDatabase.GetById(result.unitId)
 	if unit then
 		RollEvent:Fire(unit)
 	end
 
-	task.wait(2.1)  -- small cooldown so holding E doesn't spam
+	task.wait(2.1)
 	cooldown = false
 end
 
