@@ -63,8 +63,7 @@ function MeleeCombatService.TryAttack(player: Player): boolean
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 	overlapParams.FilterDescendantsInstances = { character }
 
-	local hitboxCFrame = rootPart.CFrame * CFrame.new(0, 0, -(combat.Range / 2))
-	local parts = Workspace:GetPartBoundsInBox(hitboxCFrame, combat.HitboxSize, overlapParams)
+	local parts = Workspace:GetPartBoundsInRadius(rootPart.Position, combat.Range, overlapParams)
 	local damagedEnemies: { [Model]: boolean } = {}
 	local damagedCount = 0
 
