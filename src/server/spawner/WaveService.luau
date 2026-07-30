@@ -12,7 +12,9 @@ local TOTAL_WAVES = 10
 local WaveService = {}
 local currentState: State = "Idle"
 local started = false
+local runGeneration = 0
 local spawnGenerations: { [Model]: number } = {}
+local activeCleanups: { [Model]: () -> () } = {}
 
 local function setState(state: State)
 	currentState = state
@@ -22,14 +24,24 @@ function WaveService.GetState(): State
 	return currentState
 end
 
+local function isRunActive(generation: number): boolean
+	return started and runGeneration == generation
+end
+
 function WaveService.Start(): boolean
 	if started then
 		return false
 	end
 
 	started = true
+	runGeneration += 1
+	local generation = runGeneration
 
 	for waveNumber = 1, TOTAL_WAVES do
+		if not isRunActive(generation) then
+			return false
+		end
+
 		local wave = WaveConfig[waveNumber]
 		assert(wave, `Missing configuration for wave {waveNumber}`)
 
@@ -37,6 +49,10 @@ function WaveService.Start(): boolean
 		setState("Spawning")
 
 		for enemyNumber = 1, wave.enemyCount do
+			if not isRunActive(generation) then
+				return false
+			end
+
 			local enemy = EnemySpawner.Spawn()
 			local humanoid = enemy:FindFirstChildOfClass("Humanoid")
 			assert(humanoid, `Spawned enemy for wave {waveNumber} must contain a Humanoid`)
@@ -58,11 +74,13 @@ function WaveService.Start(): boolean
 					deathConnection = nil
 				end
 
+				activeCleanups[enemy] = nil
 				EnemyFollowService.Unregister(enemy)
 				aliveCount = math.max(0, aliveCount - 1)
 				EnemyPool.Release(enemy)
 			end
 
+			activeCleanups[enemy] = cleanup
 			deathConnection = humanoid.Died:Connect(cleanup)
 
 			-- TEMPORARY TEST CODE: remove this entire block when real enemy cleanup is available.
@@ -84,16 +102,49 @@ function WaveService.Start(): boolean
 			end
 		end
 
+		if not isRunActive(generation) then
+			return false
+		end
+
 		setState("Fighting")
-		while aliveCount > 0 do
+		while aliveCount > 0 and isRunActive(generation) do
 			task.wait()
+		end
+
+		if not isRunActive(generation) then
+			return false
 		end
 
 		setState("Intermission")
 		task.wait(wave.intermission)
 	end
 
+	if not isRunActive(generation) then
+		return false
+	end
+
 	setState("Finished")
+	return true
+end
+
+function WaveService.Stop(): boolean
+	if not started then
+		return false
+	end
+
+	started = false
+	runGeneration += 1
+	setState("Idle")
+
+	local cleanups: { () -> () } = {}
+	for _, cleanup in activeCleanups do
+		table.insert(cleanups, cleanup)
+	end
+
+	for _, cleanup in cleanups do
+		cleanup()
+	end
+
 	return true
 end
 
