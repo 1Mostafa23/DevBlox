@@ -66,17 +66,17 @@ function WaveService.Start(): boolean
 			deathConnection = humanoid.Died:Connect(cleanup)
 
 			-- TEMPORARY TEST CODE: remove this entire block when real enemy cleanup is available.
-			task.spawn(function()
-				task.wait(30)
-				if cleanupHandled
-					or spawnGenerations[enemy] ~= spawnGeneration
-					or enemy:GetAttribute("PoolActive") ~= true
-				then
-					return
-				end
+			--task.spawn(function()
+				--task.wait(30)
+				--if cleanupHandled
+				--	or spawnGenerations[enemy] ~= spawnGeneration
+				--	or enemy:GetAttribute("PoolActive") ~= true
+				--then
+				--	return
+				--end
 
-				cleanup()
-			end)
+				--cleanup()
+			--end)
 			-- END TEMPORARY TEST CODE
 
 			if enemyNumber < wave.enemyCount then
