@@ -32,6 +32,21 @@ if not messageLabel then
 	messageLabel.Parent = waveGui
 end
 
+local countdownLabel = waveGui:FindFirstChild("WaveExitCountdown") :: TextLabel?
+if not countdownLabel then
+	countdownLabel = Instance.new("TextLabel")
+	countdownLabel.Name = "WaveExitCountdown"
+	countdownLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	countdownLabel.Position = UDim2.new(0.5, 0, 0.14, 0)
+	countdownLabel.Size = UDim2.fromOffset(380, 36)
+	countdownLabel.BackgroundTransparency = 1
+	countdownLabel.Font = Enum.Font.GothamBold
+	countdownLabel.TextScaled = true
+	countdownLabel.TextColor3 = Color3.fromRGB(153, 4, 41)
+	countdownLabel.Visible = false
+	countdownLabel.Parent = waveGui
+end
+
 local messageGeneration = 0
 
 local function showOutsideMessage()
@@ -60,14 +75,21 @@ RequestWaveStart.OnClientEvent:Connect(function(result)
 	elseif result == "started" then
 		messageGeneration += 1
 		messageLabel.Visible = false
+		countdownLabel.Visible = false
 		startButton.Visible = false
 		stopButton.Visible = true
 	end
 end)
 
-RequestWaveStop.OnClientEvent:Connect(function(result)
+RequestWaveStop.OnClientEvent:Connect(function(result, remaining)
 	if result == "stopped" then
+		countdownLabel.Visible = false
 		startButton.Visible = true
 		stopButton.Visible = false
+	elseif result == "countdown" and typeof(remaining) == "number" then
+		countdownLabel.Text = `Return to the arena: {remaining}`
+		countdownLabel.Visible = true
+	elseif result == "countdown_cancelled" then
+		countdownLabel.Visible = false
 	end
 end)
