@@ -5,13 +5,13 @@ local function onCharacterAdded(character)
     local humanoid = character:WaitForChild("Humanoid")
     UserInput.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
-        if input.KeyCode == Enum.KeyCode.LeftShift then
+        if input.KeyCode == Enum.KeyCode.LeftControl then
             humanoid.WalkSpeed = 25 -- Set the desired sprint speed here
         end
     end)
     UserInput.InputEnded:Connect(function(input, gameProcessed)
         if gameProcessed then return end
-        if input.KeyCode == Enum.KeyCode.LeftShift then
+        if input.KeyCode == Enum.KeyCode.LeftControl then
             humanoid.WalkSpeed = 16 -- Reset to normal walk speed here
         end
     end)

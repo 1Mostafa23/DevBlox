@@ -15,6 +15,7 @@ require(Shared.Remotes)
 local RemotesFolder = Shared:WaitForChild("Remotes")
 local DeployUnit = RemotesFolder:WaitForChild("DeployUnit") :: RemoteFunction
 local ReturnUnit = RemotesFolder:WaitForChild("ReturnUnit") :: RemoteFunction
+local SetUnitRotation = RemotesFolder:WaitForChild("SetUnitRotation") :: RemoteFunction
 
 -- Is a position inside the DeployZone part's bounds?
 local function isInZone(position: Vector3): boolean
@@ -103,10 +104,29 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 		return { ok = false, reason = "occupied" }
 	end
 
-	-- Mark deployed + spawn.
+	-- Mark deployed + spawn. DeployUnit only ever touches Position, so an existing
+	-- unit.RotationY (e.g. from a previous rotate) survives a Move untouched.
 	InventoryService.DeployUnit(player, instanceId, position)
-	UnitSpawner.Spawn(player, instanceId, unit.UnitId, position)
+	UnitSpawner.Spawn(player, instanceId, unit.UnitId, position, unit.RotationY)
 
+	return { ok = true }
+end
+
+SetUnitRotation.OnServerInvoke = function(player: Player, instanceId: string, rotationY: number)
+	if typeof(instanceId) ~= "string" or typeof(rotationY) ~= "number" or rotationY ~= rotationY then
+		return { ok = false, reason = "bad_args" }
+	end
+
+	local units = InventoryService.GetUnits(player)
+	local unit = units[instanceId]
+	if not unit then
+		return { ok = false, reason = "not_owned" }
+	end
+	if not unit.Deployed then
+		return { ok = false, reason = "not_deployed" }
+	end
+
+	InventoryService.SetUnitRotation(player, instanceId, rotationY)
 	return { ok = true }
 end
 

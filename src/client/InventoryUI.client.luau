@@ -44,8 +44,8 @@ screen.Parent = playerGui
 local openBtn = Instance.new("TextButton")
 openBtn.Name = "OpenInventoryButton"
 openBtn.Size = UDim2.fromOffset(120, 50)
-openBtn.Position = UDim2.new(0, 20, 1, -70)
-openBtn.AnchorPoint = Vector2.new(0, 0)
+openBtn.Position = UDim2.new(0.5, 0, 1, -70)
+openBtn.AnchorPoint = Vector2.new(0.5, 0)
 openBtn.BackgroundColor3 = Color3.fromRGB(45, 90, 200)
 openBtn.BorderSizePixel = 0
 openBtn.Text = "Units"
@@ -92,8 +92,8 @@ header.Parent = panel
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -120, 1, 0)
-title.Position = UDim2.fromOffset(60, 0)
+title.Size = UDim2.new(1, -212, 1, 0)
+title.Position = UDim2.fromOffset(152, 0)
 title.BackgroundTransparency = 1
 title.Text = "UNITS (0)"
 title.Font = Enum.Font.GothamBold
@@ -119,6 +119,89 @@ closeBtn.Parent = header
 local closeButtonCorner = Instance.new("UICorner")
 closeButtonCorner.CornerRadius = UDim.new(0, 8)
 closeButtonCorner.Parent = closeBtn
+
+-- =========================================================
+-- SORT DROPDOWN (header, top-left)
+-- =========================================================
+
+local SORT_MODES = { "Rarity", "Recent", "Level" }
+local currentSortMode = "Rarity"
+
+-- Assigned once the inventory list is built further down; the sort
+-- buttons close over it and call it whenever the sort mode changes.
+local renderList: (() -> ())? = nil
+
+local sortButton = Instance.new("TextButton")
+sortButton.Name = "SortButton"
+sortButton.Size = UDim2.fromOffset(130, 40)
+sortButton.Position = UDim2.fromOffset(12, 8)
+sortButton.BackgroundColor3 = Color3.fromRGB(55, 55, 68)
+sortButton.BorderSizePixel = 0
+sortButton.Text = `Sort: {currentSortMode}`
+sortButton.Font = Enum.Font.GothamBold
+sortButton.TextScaled = true
+sortButton.TextColor3 = Color3.new(1, 1, 1)
+sortButton.ZIndex = 7
+sortButton.Parent = header
+
+local sortButtonCorner = Instance.new("UICorner")
+sortButtonCorner.CornerRadius = UDim.new(0, 8)
+sortButtonCorner.Parent = sortButton
+
+local sortButtonPadding = Instance.new("UIPadding")
+sortButtonPadding.PaddingLeft = UDim.new(0, 6)
+sortButtonPadding.PaddingRight = UDim.new(0, 6)
+sortButtonPadding.Parent = sortButton
+
+-- Dropdown list of sort options, opens beneath the sort button.
+local sortOptions = Instance.new("Frame")
+sortOptions.Name = "SortOptions"
+sortOptions.Size = UDim2.fromOffset(130, #SORT_MODES * 36)
+sortOptions.Position = UDim2.fromOffset(12, 52)
+sortOptions.BackgroundColor3 = Color3.fromRGB(45, 45, 56)
+sortOptions.BorderSizePixel = 0
+sortOptions.Visible = false
+sortOptions.ZIndex = 50
+sortOptions.Parent = header
+
+local sortOptionsCorner = Instance.new("UICorner")
+sortOptionsCorner.CornerRadius = UDim.new(0, 8)
+sortOptionsCorner.Parent = sortOptions
+
+local sortOptionsLayout = Instance.new("UIListLayout")
+sortOptionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+sortOptionsLayout.Parent = sortOptions
+
+local function setSortMode(mode: string)
+	currentSortMode = mode
+	sortButton.Text = `Sort: {mode}`
+	sortOptions.Visible = false
+	if renderList then
+		renderList()
+	end
+end
+
+for i, mode in SORT_MODES do
+	local optionBtn = Instance.new("TextButton")
+	optionBtn.Name = mode
+	optionBtn.Size = UDim2.new(1, 0, 0, 36)
+	optionBtn.BackgroundTransparency = 1
+	optionBtn.Text = mode
+	optionBtn.Font = Enum.Font.Gotham
+	optionBtn.TextScaled = true
+	optionBtn.TextColor3 = Color3.new(1, 1, 1)
+	optionBtn.ZIndex = 51
+	optionBtn.LayoutOrder = i
+	optionBtn.Parent = sortOptions
+
+	optionBtn.MouseButton1Click:Connect(function()
+		setSortMode(mode)
+	end)
+end
+
+sortButton.MouseButton1Click:Connect(function()
+	sortOptions.Visible = not sortOptions.Visible
+end)
 
 -- Optional separator underneath the header.
 local headerSeparator = Instance.new("Frame")
@@ -230,6 +313,36 @@ local function registerRotation(card: Frame, model: Model, pivot: CFrame)
 	end)
 end
 -- =========================================================
+-- SORTING
+-- =========================================================
+
+local function getRarityOrder(entry: any): number
+	local config = UnitDatabase.GetById(entry.UnitId)
+	local rarity = config and RarityConfig[config.Rarity]
+	return rarity and rarity.Order or 0
+end
+
+-- Each comparator sorts "best/most relevant first".
+local SortComparators: { [string]: (any, any) -> boolean } = {
+	Rarity = function(a, b)
+		local ra, rb = getRarityOrder(a), getRarityOrder(b)
+		if ra ~= rb then
+			return ra > rb
+		end
+		return (a.Level or 0) > (b.Level or 0)
+	end,
+	Level = function(a, b)
+		if (a.Level or 0) ~= (b.Level or 0) then
+			return (a.Level or 0) > (b.Level or 0)
+		end
+		return getRarityOrder(a) > getRarityOrder(b)
+	end,
+	Recent = function(a, b)
+		return (a.AcquiredAt or 0) > (b.AcquiredAt or 0)
+	end,
+}
+
+-- =========================================================
 -- UNIT CARD
 -- =========================================================
 
@@ -323,12 +436,12 @@ local function makeCard(entry: any, layoutOrder: number)
 
 		local cf, size = model:GetBoundingBox()
 		local maxExtent = math.max(size.X, size.Y, size.Z)
-		local distance = maxExtent * 1.2
+		local distance = maxExtent * 0.85
 		local center = cf.Position
 
 		-- Fixed camera; the model spins in place (smoother than orbiting).
 		cam.CFrame = CFrame.lookAt(
-			center + Vector3.new(0, maxExtent * 0.15, distance),
+			center + Vector3.new(0, maxExtent * 0.20, distance),
 			center
 		)
 
@@ -383,8 +496,33 @@ local function clearCards()
 	end
 end
 
+-- Holds the last inventory fetched from the server so switching sort
+-- mode can re-render locally without another round trip.
+local lastResult: { any }? = nil
+
+renderList = function()
+	if not lastResult then
+		return
+	end
+
+	clearCards()
+
+	local sorted = table.clone(lastResult)
+	table.sort(sorted, SortComparators[currentSortMode])
+
+	for index, entry in sorted do
+		makeCard(entry, index)
+	end
+
+	title.Text = `UNITS ({#sorted})`
+
+	-- Allow the layout to recalculate before updating the canvas.
+	task.defer(updateCanvasSize)
+end
+
 local function refresh()
 	clearCards()
+	lastResult = nil
 
 	title.Text = "LOADING..."
 
@@ -406,17 +544,14 @@ local function refresh()
 		return
 	end
 
-	for index, entry in result do
-		makeCard(entry, index)
-	end
-
-	title.Text = `UNITS ({#result})`
+	lastResult = result
 
 	-- Reset the scroll position whenever the inventory opens.
 	grid.CanvasPosition = Vector2.zero
 
-	-- Allow the layout to recalculate before updating the canvas.
-	task.defer(updateCanvasSize)
+	if renderList then
+		renderList()
+	end
 end
 
 -- =========================================================
@@ -430,4 +565,5 @@ end)
 
 closeBtn.MouseButton1Click:Connect(function()
 	panel.Visible = false
+	sortOptions.Visible = false
 end)

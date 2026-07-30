@@ -14,7 +14,7 @@ local function respawnDeployed(player: Player)
 	for instanceId, unit in profile.Data.Units do
 		if unit.Deployed and unit.Position then
 			local pos = Vector3.new(unit.Position.X, unit.Position.Y, unit.Position.Z)
-			UnitSpawner.Spawn(player, instanceId, unit.UnitId, pos)
+			UnitSpawner.Spawn(player, instanceId, unit.UnitId, pos, unit.RotationY)
 		end
 	end
 end

@@ -24,6 +24,8 @@ function InventoryService.AddUnit(player: Player, unitId: string): string?
 		UnitId = unitId,
 		Level = 1,
 		XP = 0,
+		AcquiredAt = os.time(),
+		RotationY = 0,
 	}
 	return id
 end
@@ -69,4 +71,16 @@ function InventoryService.UndeployUnit(player: Player, instanceId: string): bool
 	unit.Position = nil
 	return true
 end
+
+-- Saves a deployed unit's facing (Y-axis rotation, radians). Returns true on success.
+function InventoryService.SetUnitRotation(player: Player, instanceId: string, rotationY: number): boolean
+	local profile = PlayerDataService.GetProfile(player)
+	if not profile then return false end
+	local unit = profile.Data.Units[instanceId]
+	if not unit then return false end
+
+	unit.RotationY = rotationY
+	return true
+end
+
 return InventoryService

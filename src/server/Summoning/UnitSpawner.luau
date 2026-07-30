@@ -53,8 +53,8 @@ local function makeLabel(model: Model, config)
 	nameLabel.Parent = billboard
 end
 
--- Spawns a deployed unit for a player at a position.
-function UnitSpawner.Spawn(player: Player, instanceId: string, unitId: string, position: Vector3)
+-- Spawns a deployed unit for a player at a position, facing rotationY (radians, optional).
+function UnitSpawner.Spawn(player: Player, instanceId: string, unitId: string, position: Vector3, rotationY: number?)
 	local config = UnitDatabase.GetById(unitId)
 	if not config then return end
 	local template = UnitModels:FindFirstChild(config.ModelName)
@@ -75,7 +75,9 @@ function UnitSpawner.Spawn(player: Player, instanceId: string, unitId: string, p
 	end
 
 	local _, size = model:GetBoundingBox()
-	model:PivotTo(CFrame.new(position + Vector3.new(0, size.Y / 2, 0)))
+	model:PivotTo(
+		CFrame.new(position + Vector3.new(0, size.Y / 2, 0)) * CFrame.Angles(0, rotationY or 0, 0)
+	)
 	makeLabel(model, config)
 	model.Parent = deployedFolder
 	model:SetAttribute("InstanceId", instanceId)

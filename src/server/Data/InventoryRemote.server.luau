@@ -9,7 +9,7 @@ require(Shared.Remotes)
 local RemotesFolder = Shared:WaitForChild("Remotes")
 local GetInventory = RemotesFolder:WaitForChild("GetInventory") :: RemoteFunction
 
--- Returns a clean array the client can display: { {instanceId, UnitId, Level}, ... }
+-- Returns a clean array the client can display: { {instanceId, UnitId, Level, AcquiredAt}, ... }
 GetInventory.OnServerInvoke = function(player: Player)
 	local units = InventoryService.GetUnits(player)
 	local list = {}
@@ -18,6 +18,7 @@ GetInventory.OnServerInvoke = function(player: Player)
 			instanceId = instanceId,
 			UnitId = data.UnitId,
 			Level = data.Level,
+			AcquiredAt = data.AcquiredAt,
 		})
 	end
 	return list

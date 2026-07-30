@@ -25,6 +25,7 @@ local clickConn: RBXScriptConnection? = nil
 local ghostDescendantAddedConn: RBXScriptConnection? = nil
 local ghostBoundsOffset: CFrame? = nil
 local ghostBoundsSize: Vector3? = nil
+local currentRotationY = 0
 
 local function configureGhostPart(instance: Instance)
 	if instance:IsA("BasePart") then
@@ -115,12 +116,14 @@ local function getPlacement(): (Vector3?, CFrame?, boolean)
 	end
 
 	local proposedPivot = CFrame.new(position + Vector3.new(0, boundsSize.Y / 2, 0))
+		* CFrame.Angles(0, currentRotationY, 0)
 	local proposedBounds = proposedPivot * boundsOffset
 	return position, proposedPivot, inZone and not isOccupied(proposedBounds, boundsSize)
 end
 
-function PlacementController.Begin(instanceId: string, modelName: string)
+function PlacementController.Begin(instanceId: string, modelName: string, rotationY: number?)
 	if active then PlacementController.Cancel() end
+	currentRotationY = rotationY or 0
 	local source = DisplayModels:FindFirstChild(modelName)
 	if not source or not source:IsA("Model") then
 		warn("PlacementController: no display model " .. modelName)
@@ -179,6 +182,7 @@ function PlacementController.Cancel()
 	currentInstanceId = nil
 	ghostBoundsOffset = nil
 	ghostBoundsSize = nil
+	currentRotationY = 0
 	if moveConn then moveConn:Disconnect(); moveConn = nil end
 	if clickConn then clickConn:Disconnect(); clickConn = nil end
 	if ghostDescendantAddedConn then

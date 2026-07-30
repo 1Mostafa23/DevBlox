@@ -21,6 +21,7 @@ if RunService:IsServer() then
 	ensure("RemoteEvent", "RequestWaveStop")
 	ensure("RemoteFunction", "DeployUnit")   -- NEW
 	ensure("RemoteFunction", "ReturnUnit")   -- NEW
+	ensure("RemoteFunction", "SetUnitRotation")
 end
 
 return {}
