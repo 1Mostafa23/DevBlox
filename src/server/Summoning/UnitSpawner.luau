@@ -3,13 +3,17 @@
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UnitDatabase = require(Shared.UnitDatabase)
+local UnitConfig = require(Shared.UnitConfig)
 local RarityConfig = require(Shared.RarityConfig)
 local UnitCollisionService = require(script.Parent.Parent.collisions.UnitCollisionService)
 
 local UnitModels = ServerStorage:WaitForChild("UnitModels")
+local deployZone = Workspace:WaitForChild("DeployZone")
+assert(deployZone:IsA("BasePart"), "Workspace.DeployZone must be a BasePart")
 
 -- A folder in Workspace to hold all deployed units.
 local deployedFolder = Workspace:FindFirstChild("DeployedUnits")
@@ -19,10 +23,87 @@ if not deployedFolder then
 	deployedFolder.Parent = Workspace
 end
 
+local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
+
 local UnitSpawner = {}
 
 -- Track deployed unit models by player + instanceId so we can remove/update them.
 local deployed: { [Player]: { [string]: Model } } = {}
+local deathConnections: { [Model]: RBXScriptConnection } = {}
+local deadForRun: { [number]: { [string]: boolean } } = {}
+type PlacementRecord = {
+	unitId: string,
+	homeCFrame: CFrame,
+}
+local placements: { [number]: { [string]: PlacementRecord } } = {}
+local spawnUnit: (
+	Player,
+	string,
+	string,
+	Vector3?,
+	number?,
+	CFrame?
+) -> Model?
+
+local function resolveZoneSurface(position: Vector3, clampOutside: boolean): (Vector3?, Vector3?, boolean)
+	local localPosition = deployZone.CFrame:PointToObjectSpace(position)
+	local halfSize = deployZone.Size * 0.5
+	local inside = math.abs(localPosition.X) <= halfSize.X
+		and math.abs(localPosition.Z) <= halfSize.Z
+	if not inside and not clampOutside then
+		return nil, nil, false
+	end
+
+	local zonePosition = Vector3.new(
+		math.clamp(localPosition.X, -halfSize.X, halfSize.X),
+		halfSize.Y,
+		math.clamp(localPosition.Z, -halfSize.Z, halfSize.Z)
+	)
+	return deployZone.CFrame:PointToWorldSpace(zonePosition), zonePosition, inside
+end
+
+function UnitSpawner.ResolveZonePosition(
+	position: Vector3,
+	clampOutside: boolean?
+): (Vector3?, Vector3?, boolean)
+	return resolveZoneSurface(position, clampOutside == true)
+end
+
+function UnitSpawner.ZoneToWorldPosition(zonePosition: Vector3): (Vector3, boolean)
+	local halfSize = deployZone.Size * 0.5
+	local inside = math.abs(zonePosition.X) <= halfSize.X
+		and math.abs(zonePosition.Z) <= halfSize.Z
+	local clampedZonePosition = Vector3.new(
+		math.clamp(zonePosition.X, -halfSize.X, halfSize.X),
+		halfSize.Y,
+		math.clamp(zonePosition.Z, -halfSize.Z, halfSize.Z)
+	)
+	return deployZone.CFrame:PointToWorldSpace(clampedZonePosition), inside
+end
+
+local function clampHomeCFrame(homeCFrame: CFrame, modelHeight: number, context: string): CFrame
+	local surfacePosition, _, inside = resolveZoneSurface(homeCFrame.Position, true)
+	assert(surfacePosition, "Workspace.DeployZone could not resolve a surface position")
+	if inside then
+		return homeCFrame
+	end
+
+	warn(`[UnitSpawner] stale HomeCFrame outside Workspace.DeployZone for {context}; clamping inside zone`)
+	return CFrame.new(surfacePosition + Vector3.new(0, modelHeight / 2, 0)) * homeCFrame.Rotation
+end
+
+local function getLivingUnitCount(): number
+	local livingCount = 0
+	for _, playerUnits in deployed do
+		for _, model in playerUnits do
+			local humanoid = model:FindFirstChildOfClass("Humanoid")
+			if model:IsDescendantOf(deployedFolder) and humanoid and humanoid.Health > 0 then
+				livingCount += 1
+			end
+		end
+	end
+	return livingCount
+end
 
 local function makeLabel(model: Model, config)
 	local rarity = RarityConfig[config.Rarity]
@@ -53,31 +134,173 @@ local function makeLabel(model: Model, config)
 	nameLabel.Parent = billboard
 end
 
--- Spawns a deployed unit for a player at a position, facing rotationY (radians, optional).
-function UnitSpawner.Spawn(player: Player, instanceId: string, unitId: string, position: Vector3, rotationY: number?)
+local function removeRuntimeUnit(
+	player: Player,
+	instanceId: string,
+	model: Model,
+	markDeadForRun: boolean
+): boolean
+	local playerUnits = deployed[player]
+	if not playerUnits or playerUnits[instanceId] ~= model then
+		return false
+	end
+
+	playerUnits[instanceId] = nil
+	if next(playerUnits) == nil then
+		deployed[player] = nil
+	end
+
+	if markDeadForRun then
+		deadForRun[player.UserId] = deadForRun[player.UserId] or {}
+		deadForRun[player.UserId][instanceId] = true
+	end
+
+	local deathConnection = deathConnections[model]
+	if deathConnection then
+		deathConnections[model] = nil
+		deathConnection:Disconnect()
+	end
+
+	UnitFollowService.Unregister(model)
+	model:Destroy()
+	return true
+end
+
+function UnitSpawner.BeginRun()
+	deadForRun = {}
+end
+
+function UnitSpawner.EndRun()
+end
+
+function UnitSpawner.GetLivingUnitCount(): number
+	return getLivingUnitCount()
+end
+
+function UnitSpawner.IsUnavailableForRun(player: Player, instanceId: string): boolean
+	local playerDeadUnits = deadForRun[player.UserId]
+	return playerDeadUnits ~= nil and playerDeadUnits[instanceId] == true
+end
+
+function UnitSpawner.RestoreAllForNextRun()
+	deadForRun = {}
+
+	local records: { { player: Player, instanceId: string, placement: PlacementRecord } } = {}
+	for userId, playerPlacements in placements do
+		local player = Players:GetPlayerByUserId(userId)
+		if not player then
+			continue
+		end
+		for instanceId, placement in playerPlacements do
+			table.insert(records, {
+				player = player,
+				instanceId = instanceId,
+				placement = placement,
+			})
+		end
+	end
+
+	for _, record in records do
+		local player = record.player
+		local instanceId = record.instanceId
+		local placement = record.placement
+		local playerUnits = deployed[player]
+		local model = playerUnits and playerUnits[instanceId]
+		local humanoid = model and model:FindFirstChildOfClass("Humanoid")
+
+		if model and humanoid and humanoid.Health > 0 then
+			local config = UnitDatabase.GetById(placement.unitId)
+			local archetype = config and UnitConfig.GetArchetype(config.Archetype)
+			local rarity = config and UnitConfig.GetRarityMultiplier(config.Rarity)
+			if archetype and rarity then
+				local stats = UnitConfig.ApplyMultipliers(archetype, rarity)
+				UnitFollowService.Unregister(model)
+				local _, size = model:GetBoundingBox()
+				local homeCFrame = clampHomeCFrame(
+					placement.homeCFrame,
+					size.Y,
+					`{player.Name}/{instanceId}`
+				)
+				placement.homeCFrame = homeCFrame
+				model:SetAttribute("HomeCFrame", homeCFrame)
+				model:PivotTo(homeCFrame)
+				humanoid.MaxHealth = stats.MaxHealth
+				humanoid.Health = humanoid.MaxHealth
+				UnitFollowService.Register(model)
+			end
+		else
+			if model then
+				removeRuntimeUnit(player, instanceId, model, false)
+			end
+			spawnUnit(
+				player,
+				instanceId,
+				placement.unitId,
+				nil,
+				nil,
+				placement.homeCFrame
+			)
+		end
+	end
+end
+
+spawnUnit = function(
+	player: Player,
+	instanceId: string,
+	unitId: string,
+	position: Vector3?,
+	rotationY: number?,
+	authoritativeHomeCFrame: CFrame?
+): Model?
+	if UnitSpawner.IsUnavailableForRun(player, instanceId) then
+		return nil
+	end
+
 	local config = UnitDatabase.GetById(unitId)
-	if not config then return end
+	if not config then return nil end
+	local archetypeConfig = UnitConfig.GetArchetype(config.Archetype)
+	local rarityMultiplier = UnitConfig.GetRarityMultiplier(config.Rarity)
+	if not archetypeConfig or not rarityMultiplier then
+		warn(`UnitSpawner: unknown archetype {config.Archetype} for unit {unitId}`)
+		return nil
+	end
+	local stats = UnitConfig.ApplyMultipliers(archetypeConfig, rarityMultiplier)
 	local template = UnitModels:FindFirstChild(config.ModelName)
-	if not template then
+	if not template or not template:IsA("Model") then
 		warn("UnitSpawner: no model named " .. config.ModelName)
-		return
+		return nil
 	end
 
 	-- Remove any existing model for this instance first (avoid duplicates).
 	UnitSpawner.Despawn(player, instanceId, true)  -- silent = true: no poof on re-spawn
 
 	local model = template:Clone()
+	model:ScaleTo(archetypeConfig.ModelScale)
 	local hum = model:FindFirstChildOfClass("Humanoid")
 	if hum then
+		hum.MaxHealth = stats.MaxHealth
+		hum.Health = hum.MaxHealth
 		hum.WalkSpeed = 0
 		hum.JumpPower = 0
 		hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
 	end
 
 	local _, size = model:GetBoundingBox()
-	model:PivotTo(
-		CFrame.new(position + Vector3.new(0, size.Y / 2, 0)) * CFrame.Angles(0, rotationY or 0, 0)
-	)
+	local homeCFrame = authoritativeHomeCFrame
+	if homeCFrame then
+		homeCFrame = clampHomeCFrame(homeCFrame, size.Y, `{player.Name}/{instanceId}`)
+	else
+		assert(position, "UnitSpawner.Spawn requires a deployment position")
+		local surfacePosition, _, inside = resolveZoneSurface(position, true)
+		assert(surfacePosition, "Workspace.DeployZone could not resolve a surface position")
+		if not inside then
+			warn(`[UnitSpawner] placement outside Workspace.DeployZone for {player.Name}/{instanceId}; clamping inside zone`)
+		end
+		homeCFrame = CFrame.new(surfacePosition + Vector3.new(0, size.Y / 2, 0))
+			* CFrame.Angles(0, rotationY or 0, 0)
+	end
+	model:PivotTo(homeCFrame)
+	model:SetAttribute("HomeCFrame", homeCFrame)
 	makeLabel(model, config)
 	model.Parent = deployedFolder
 	model:SetAttribute("InstanceId", instanceId)
@@ -86,9 +309,57 @@ function UnitSpawner.Spawn(player: Player, instanceId: string, unitId: string, p
 
 	-- Set collision group AFTER parenting so the Humanoid can't override it.
 	UnitCollisionService.RegisterUnit(model)
+	UnitFollowService.Register(model)
 
 	deployed[player] = deployed[player] or {}
 	deployed[player][instanceId] = model
+	if hum then
+		deathConnections[model] = hum.Died:Connect(function()
+			removeRuntimeUnit(player, instanceId, model, true)
+		end)
+	end
+	placements[player.UserId] = placements[player.UserId] or {}
+	placements[player.UserId][instanceId] = {
+		unitId = unitId,
+		homeCFrame = homeCFrame,
+	}
+	return model
+end
+
+-- Spawns a deployed unit for a player at a position, facing rotationY (radians, optional).
+function UnitSpawner.Spawn(
+	player: Player,
+	instanceId: string,
+	unitId: string,
+	position: Vector3,
+	rotationY: number?
+): Model?
+	return spawnUnit(player, instanceId, unitId, position, rotationY, nil)
+end
+
+function UnitSpawner.UpdateHomeRotation(player: Player, instanceId: string, rotationY: number): boolean
+	local playerUnits = deployed[player]
+	local model = playerUnits and playerUnits[instanceId]
+	if not model then
+		return false
+	end
+
+	local homeCFrame = model:GetAttribute("HomeCFrame")
+	if typeof(homeCFrame) ~= "CFrame" then
+		return false
+	end
+
+	local rotatedHome = CFrame.new(homeCFrame.Position) * CFrame.Angles(0, rotationY, 0)
+	model:SetAttribute("HomeCFrame", rotatedHome)
+	local playerPlacements = placements[player.UserId]
+	local placement = playerPlacements and playerPlacements[instanceId]
+	if placement then
+		placement.homeCFrame = rotatedHome
+	end
+	if model:GetAttribute("UnitState") == "Idle" then
+		model:PivotTo(rotatedHome)
+	end
+	return true
 end
 
 -- Removes a specific deployed unit. Pass silent=true to skip the poof.
@@ -120,8 +391,14 @@ function UnitSpawner.Despawn(player: Player, instanceId: string, silent: boolean
 			task.delay(1, function() fx:Destroy() end)
 		end
 
-		model:Destroy()
-		playerUnits[instanceId] = nil
+		removeRuntimeUnit(player, instanceId, model, false)
+	end
+	local playerPlacements = placements[player.UserId]
+	if playerPlacements then
+		playerPlacements[instanceId] = nil
+		if next(playerPlacements) == nil then
+			placements[player.UserId] = nil
+		end
 	end
 end
 
@@ -129,11 +406,15 @@ end
 function UnitSpawner.DespawnAll(player: Player)
 	local playerUnits = deployed[player]
 	if playerUnits then
-		for _, model in playerUnits do
-			model:Destroy()
+		local unitsToRemove: { { instanceId: string, model: Model } } = {}
+		for instanceId, model in playerUnits do
+			table.insert(unitsToRemove, { instanceId = instanceId, model = model })
 		end
-		deployed[player] = nil
+		for _, unit in unitsToRemove do
+			removeRuntimeUnit(player, unit.instanceId, unit.model, false)
+		end
 	end
+	placements[player.UserId] = nil
 end
 
 return UnitSpawner

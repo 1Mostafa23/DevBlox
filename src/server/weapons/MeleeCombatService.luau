@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
 local WeaponResolver = require(script.Parent.WeaponResolver)
+local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
 
 local activeEnemiesFolder = Workspace:WaitForChild("ActiveEnemies")
 local lastAttackTimes: { [Player]: number } = {}
@@ -35,9 +36,8 @@ function MeleeCombatService.TryAttack(player: Player): boolean
 		return false
 	end
 
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or humanoid.Health <= 0 or not rootPart or not rootPart:IsA("BasePart") then
+	if not PlayerHealthService.IsAlive(player) or not rootPart or not rootPart:IsA("BasePart") then
 		return false
 	end
 

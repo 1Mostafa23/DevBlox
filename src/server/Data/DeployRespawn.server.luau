@@ -13,8 +13,30 @@ local function respawnDeployed(player: Player)
 
 	for instanceId, unit in profile.Data.Units do
 		if unit.Deployed and unit.Position then
-			local pos = Vector3.new(unit.Position.X, unit.Position.Y, unit.Position.Z)
-			UnitSpawner.Spawn(player, instanceId, unit.UnitId, pos, unit.RotationY)
+			local savedZonePosition = unit.ZonePosition
+			local savedPosition: Vector3
+			local savedZoneWasInside = true
+			if savedZonePosition then
+				savedPosition, savedZoneWasInside = UnitSpawner.ZoneToWorldPosition(Vector3.new(
+					savedZonePosition.X,
+					savedZonePosition.Y,
+					savedZonePosition.Z
+				))
+			else
+				savedPosition = Vector3.new(unit.Position.X, unit.Position.Y, unit.Position.Z)
+			end
+			local position, zonePosition, wasInside = UnitSpawner.ResolveZonePosition(savedPosition, true)
+			if position and zonePosition then
+				if not savedZoneWasInside or not wasInside then
+					warn(
+						`[DeployRespawn] stale position outside Workspace.DeployZone for {player.Name}/{instanceId}; clamped inside zone`
+					)
+				end
+				local model = UnitSpawner.Spawn(player, instanceId, unit.UnitId, position, unit.RotationY)
+				if model then
+					InventoryService.DeployUnit(player, instanceId, position, zonePosition)
+				end
+			end
 		end
 	end
 end

@@ -49,9 +49,10 @@ end
 
 local messageGeneration = 0
 
-local function showOutsideMessage()
+local function showMessage(text: string)
 	messageGeneration += 1
 	local generation = messageGeneration
+	messageLabel.Text = text
 	messageLabel.Visible = true
 
 	task.delay(2, function()
@@ -71,7 +72,7 @@ end)
 
 RequestWaveStart.OnClientEvent:Connect(function(result)
 	if result == "outside_zone" then
-		showOutsideMessage()
+		showMessage("Enter the arena to start the wave")
 	elseif result == "started" then
 		messageGeneration += 1
 		messageLabel.Visible = false
@@ -86,6 +87,8 @@ RequestWaveStop.OnClientEvent:Connect(function(result, remaining)
 		countdownLabel.Visible = false
 		startButton.Visible = true
 		stopButton.Visible = false
+	elseif result == "defeated" then
+		showMessage("U have lost\n Try Again")
 	elseif result == "countdown" and typeof(remaining) == "number" then
 		countdownLabel.Text = `Return to the arena: {remaining}`
 		countdownLabel.Visible = true

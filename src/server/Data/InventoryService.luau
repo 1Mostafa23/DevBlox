@@ -49,7 +49,12 @@ function InventoryService.RemoveUnit(player: Player, instanceId: string): boolea
 end
 
 -- Marks a unit as deployed at a position. Returns true on success.
-function InventoryService.DeployUnit(player: Player, instanceId: string, position: Vector3): boolean
+function InventoryService.DeployUnit(
+	player: Player,
+	instanceId: string,
+	position: Vector3,
+	zonePosition: Vector3?
+): boolean
 	local profile = PlayerDataService.GetProfile(player)
 	if not profile then return false end
 	local unit = profile.Data.Units[instanceId]
@@ -57,6 +62,9 @@ function InventoryService.DeployUnit(player: Player, instanceId: string, positio
 
 	unit.Deployed = true
 	unit.Position = { X = position.X, Y = position.Y, Z = position.Z }  -- store as plain table (saveable)
+	if zonePosition then
+		unit.ZonePosition = { X = zonePosition.X, Y = zonePosition.Y, Z = zonePosition.Z }
+	end
 	return true
 end
 
@@ -69,6 +77,7 @@ function InventoryService.UndeployUnit(player: Player, instanceId: string): bool
 
 	unit.Deployed = false
 	unit.Position = nil
+	unit.ZonePosition = nil
 	return true
 end
 

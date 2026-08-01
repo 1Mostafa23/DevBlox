@@ -3,6 +3,9 @@
 local EnemySpawner = require(script.Parent.EnemySpawner)
 local EnemyPool = require(script.Parent.EnemyPool)
 local EnemyFollowService = require(script.Parent.Parent.enemies.EnemyFollowService)
+local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
+local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
+local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
 local WaveConfig = require(script.Parent.WaveConfig)
 
 type State = "Idle" | "Spawning" | "Fighting" | "Intermission" | "Finished"
@@ -12,6 +15,7 @@ local TOTAL_WAVES = 10
 local WaveService = {}
 local currentState: State = "Idle"
 local started = false
+local currentRunOwner: Player? = nil
 local runGeneration = 0
 local spawnGenerations: { [Model]: number } = {}
 local activeCleanups: { [Model]: () -> () } = {}
@@ -28,14 +32,17 @@ local function isRunActive(generation: number): boolean
 	return started and runGeneration == generation
 end
 
-function WaveService.Start(): boolean
+function WaveService.Start(owner: Player): boolean
 	if started then
 		return false
 	end
 
 	started = true
+	currentRunOwner = owner
+	EnemyFollowService.SetRunOwner(owner)
 	runGeneration += 1
 	local generation = runGeneration
+	UnitSpawner.BeginRun()
 
 	for waveNumber = 1, TOTAL_WAVES do
 		if not isRunActive(generation) then
@@ -46,6 +53,8 @@ function WaveService.Start(): boolean
 		assert(wave, `Missing configuration for wave {waveNumber}`)
 
 		local aliveCount = 0
+		EnemyFollowService.BeginWave()
+		UnitFollowService.BeginWave()
 		setState("Spawning")
 
 		for enemyNumber = 1, wave.enemyCount do
@@ -115,6 +124,11 @@ function WaveService.Start(): boolean
 			return false
 		end
 
+		EnemyFollowService.EndWave()
+		UnitFollowService.ReturnAllToHome()
+		if not isRunActive(generation) then
+			return false
+		end
 		setState("Intermission")
 		task.wait(wave.intermission)
 	end
@@ -123,6 +137,13 @@ function WaveService.Start(): boolean
 		return false
 	end
 
+	UnitSpawner.EndRun()
+	local completedRunOwner = currentRunOwner
+	currentRunOwner = nil
+	EnemyFollowService.SetRunOwner(nil)
+	if completedRunOwner then
+		PlayerHealthService.Reset(completedRunOwner)
+	end
 	setState("Finished")
 	return true
 end
@@ -133,8 +154,12 @@ function WaveService.Stop(): boolean
 	end
 
 	started = false
+	local stoppedRunOwner = currentRunOwner
+	currentRunOwner = nil
+	EnemyFollowService.SetRunOwner(nil)
 	runGeneration += 1
 	setState("Idle")
+	EnemyFollowService.EndWave()
 
 	local cleanups: { () -> () } = {}
 	for _, cleanup in activeCleanups do
@@ -143,6 +168,13 @@ function WaveService.Stop(): boolean
 
 	for _, cleanup in cleanups do
 		cleanup()
+	end
+	activeCleanups = {}
+	spawnGenerations = {}
+	UnitFollowService.ResetAllToHome()
+	UnitSpawner.RestoreAllForNextRun()
+	if stoppedRunOwner then
+		PlayerHealthService.Reset(stoppedRunOwner)
 	end
 
 	return true

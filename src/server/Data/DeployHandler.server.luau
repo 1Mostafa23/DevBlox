@@ -17,21 +17,6 @@ local DeployUnit = RemotesFolder:WaitForChild("DeployUnit") :: RemoteFunction
 local ReturnUnit = RemotesFolder:WaitForChild("ReturnUnit") :: RemoteFunction
 local SetUnitRotation = RemotesFolder:WaitForChild("SetUnitRotation") :: RemoteFunction
 
--- Is a position inside the DeployZone part's bounds?
-local function isInZone(position: Vector3): boolean
-	local zone = Workspace:FindFirstChild("DeployZone")
-	if not zone or not zone:IsA("BasePart") then
-		warn("DeployHandler: no DeployZone part in Workspace")
-		return false
-	end
-	-- transform the point into the zone's local space and check against half-size
-	local localPoint = zone.CFrame:PointToObjectSpace(position)
-	local half = zone.Size / 2
-	return math.abs(localPoint.X) <= half.X
-		and math.abs(localPoint.Z) <= half.Z
-	-- (Y not checked — we place on the zone surface; adjust if you want vertical bounds)
-end
-
 local function findDeployedModel(instance: Instance, deployedFolder: Instance): Model?
 	local current: Instance? = instance
 	while current and current ~= deployedFolder do
@@ -90,13 +75,17 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 	if not unit then
 		return { ok = false, reason = "not_owned" }
 	end
+	if UnitSpawner.IsUnavailableForRun(player, instanceId) then
+		return { ok = false, reason = "unit_dead" }
+	end
 
-	-- Validate the position is inside the allowed zone.
-	if not isInZone(position) then
+	-- Validate and project placement onto the designated zone's top surface.
+	local zoneWorldPosition, zonePosition, isInsideZone = UnitSpawner.ResolveZonePosition(position, false)
+	if not isInsideZone or not zoneWorldPosition or not zonePosition then
 		return { ok = false, reason = "out_of_zone" }
 	end
 
-	local occupied = isOccupied(unit.UnitId, instanceId, position)
+	local occupied = isOccupied(unit.UnitId, instanceId, zoneWorldPosition)
 	if occupied == nil then
 		return { ok = false, reason = "invalid_unit" }
 	end
@@ -104,10 +93,12 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 		return { ok = false, reason = "occupied" }
 	end
 
-	-- Mark deployed + spawn. DeployUnit only ever touches Position, so an existing
-	-- unit.RotationY (e.g. from a previous rotate) survives a Move untouched.
-	InventoryService.DeployUnit(player, instanceId, position)
-	UnitSpawner.Spawn(player, instanceId, unit.UnitId, position, unit.RotationY)
+	-- Spawn at the validated zone position, then persist its world and zone-local position.
+	local model = UnitSpawner.Spawn(player, instanceId, unit.UnitId, zoneWorldPosition, unit.RotationY)
+	if not model then
+		return { ok = false, reason = "spawn_failed" }
+	end
+	InventoryService.DeployUnit(player, instanceId, zoneWorldPosition, zonePosition)
 
 	return { ok = true }
 end
@@ -127,6 +118,7 @@ SetUnitRotation.OnServerInvoke = function(player: Player, instanceId: string, ro
 	end
 
 	InventoryService.SetUnitRotation(player, instanceId, rotationY)
+	UnitSpawner.UpdateHomeRotation(player, instanceId, rotationY)
 	return { ok = true }
 end
 

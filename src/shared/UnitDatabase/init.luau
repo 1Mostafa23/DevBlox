@@ -1,12 +1,13 @@
 --!strict
 -- ReplicatedStorage/Shared/UnitDatabase/init.luau
+local ArchetypeConfig = require(script.Parent:WaitForChild("UnitConfig"))
 local UnitsFolder = script:WaitForChild("Units")
 
 export type UnitConfig = {
 	Id: string,
 	DisplayName: string,
 	Rarity: string,
-	Stats: { [string]: number },
+	Archetype: ArchetypeConfig.Archetype,
 	ModelName: string,
 	WeightOverride: number?,   -- legacy per-unit weight (kept for compatibility)
 	InTierWeight: number?,     -- NEW: relative weight WITHIN its rarity; nil = 1 (uniform)
