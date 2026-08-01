@@ -46,6 +46,21 @@ function WaveService.GetState(owner: Player): State
 	return if context then context.State else "Idle"
 end
 
+function WaveService.IsDeploymentLocked(owner: Player): boolean
+	local context = runContexts[owner]
+	if not context then
+		return false
+	end
+
+	if context.Started and context.State == "Idle" then
+		return true
+	end
+
+	return context.State == "Spawning"
+		or context.State == "Fighting"
+		or context.State == "Intermission"
+end
+
 local function runWaves(context: RunContext, generation: number)
 	local owner = context.OwnerPlayer
 
@@ -137,6 +152,8 @@ local function runWaves(context: RunContext, generation: number)
 	UnitSpawner.EndRun(context)
 	PlayerHealthService.Reset(owner)
 	setState(context, "Finished")
+	context.Started = false
+	context.StartRequested = false
 end
 
 function WaveService.Start(owner: Player): boolean
@@ -147,6 +164,7 @@ function WaveService.Start(owner: Player): boolean
 
 	context.Started = true
 	context.StartRequested = true
+	setState(context, "Idle")
 	context.CurrentWave = 0
 	context.RunGeneration += 1
 	context.FeedbackGeneration = nil

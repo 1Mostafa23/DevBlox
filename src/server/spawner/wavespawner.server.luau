@@ -2,7 +2,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local WaveService = require(script.Parent.WaveService)
-local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -10,7 +9,6 @@ require(Shared:WaitForChild("Remotes"))
 
 local RequestWaveStart = Shared:WaitForChild("Remotes"):WaitForChild("RequestWaveStart") :: RemoteEvent
 local RequestWaveStop = Shared:WaitForChild("Remotes"):WaitForChild("RequestWaveStop") :: RemoteEvent
-local BossTrigger = ArenaService.GetCurrent().BossTrigger
 
 local COUNTDOWN_SECONDS = 5
 local MONITOR_INTERVAL = 0.2
@@ -28,9 +26,9 @@ local function sendDefeatFeedback(player: Player, sessionGeneration: number)
 	RequestWaveStop:FireClient(player, "defeated")
 end
 
-local function isInsideBossTrigger(rootPart: BasePart): boolean
-	local localPosition = BossTrigger.CFrame:PointToObjectSpace(rootPart.Position)
-	local halfSize = BossTrigger.Size * 0.5
+local function isInsideBossTrigger(rootPart: BasePart, bossTrigger: BasePart): boolean
+	local localPosition = bossTrigger.CFrame:PointToObjectSpace(rootPart.Position)
+	local halfSize = bossTrigger.Size * 0.5
 
 	return math.abs(localPosition.X) <= halfSize.X
 		and math.abs(localPosition.Z) <= halfSize.Z
@@ -62,15 +60,11 @@ local function stopActiveWave(player: Player, reason: string): boolean
 
 	context.StopGuard = true
 	local waveStopped = WaveService.Stop(player, reason)
-	if not waveStopped and not context.StartRequested then
+	if not waveStopped then
 		context.StopGuard = false
 		return false
 	end
 
-	if not waveStopped then
-		PlayerHealthService.Reset(player)
-	end
-	context.StartRequested = false
 	RequestWaveStop:FireClient(player, "stopped")
 	context.StopGuard = false
 	return true
@@ -102,16 +96,20 @@ local function monitorStarter(player: Player, sessionGeneration: number)
 
 	while true do
 		local context = WaveService.GetRunContext(player)
-		if not context
-			or not context.StartRequested
-			or context.RunGeneration ~= sessionGeneration
-			or WaveService.GetState(player) == "Finished"
-		then
+		if not context or context.RunGeneration ~= sessionGeneration then
+			return
+		end
+		if context.State == "Finished" then
+			RequestWaveStop:FireClient(player, "completed")
+			return
+		end
+		if not context.StartRequested then
 			return
 		end
 
 		local rootPart = getLivingRoot(player)
-		local isInside = rootPart ~= nil and isInsideBossTrigger(rootPart)
+		local isInside = rootPart ~= nil
+			and isInsideBossTrigger(rootPart, context.ArenaContext.BossTrigger)
 
 		if isInside then
 			if countdownDeadline then
@@ -151,15 +149,12 @@ RequestWaveStart.OnServerEvent:Connect(function(player)
 		return
 	end
 
-	if not isInsideBossTrigger(rootPart) then
+	if not isInsideBossTrigger(rootPart, context.ArenaContext.BossTrigger) then
 		RequestWaveStart:FireClient(player, "outside_zone")
 		return
 	end
 
-	context.StartRequested = true
-	context.FeedbackGeneration = nil
 	if not WaveService.Start(player) then
-		context.StartRequested = false
 		return
 	end
 

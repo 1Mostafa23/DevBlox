@@ -30,6 +30,10 @@ local rotateDirection = 1 -- 1 = right (clockwise), -1 = left (counter-clockwise
 local rotateBasePivot: CFrame? = nil
 local rotateAngle = 0
 
+local function isDeploymentLocked(): boolean
+	return player:GetAttribute("DeploymentLocked") == true
+end
+
 -- ===== The action panel (fixed bottom-right, mobile-friendly) =====
 local screen = Instance.new("ScreenGui")
 screen.Name = "UnitActions"
@@ -271,13 +275,13 @@ local function setRotateMenuOpen(open: boolean)
 end
 
 local function toggleRotateMenu()
-	if not selectedModel then return end
+	if isDeploymentLocked() or not selectedModel then return end
 	setRotateMenuOpen(not rotateMenuOpen)
 end
 
 -- Sends the unit's current facing to the server so it survives Move/rejoin.
 local function saveRotation()
-	if not selectedModel or not selectedInstanceId then return end
+	if isDeploymentLocked() or not selectedModel or not selectedInstanceId then return end
 	local _, angleY = selectedModel:GetPivot():ToEulerAnglesYXZ()
 	local id = selectedInstanceId
 	task.spawn(function()
@@ -300,7 +304,7 @@ end
 
 -- Hold to spin in `direction` (1 = right, -1 = left); releasing stops and saves.
 local function startRotating(direction: number)
-	if not selectedModel then return end
+	if isDeploymentLocked() or not selectedModel then return end
 	rotateDirection = direction
 	rotateBasePivot = selectedModel:GetPivot()
 	rotateAngle = 0
@@ -326,6 +330,7 @@ local function deselect()
 end
 
 local function select(model: Model)
+	if isDeploymentLocked() then return end
 	deselect()
 	selectedModel = model
 	selectedInstanceId = model:GetAttribute("InstanceId")
@@ -376,7 +381,7 @@ end
 
 -- ===== Actions =====
 local function beginMove()
-	if not selectedModel or not selectedInstanceId then return end
+	if isDeploymentLocked() or not selectedModel or not selectedInstanceId then return end
 	local unitId = selectedModel:GetAttribute("UnitId")
 	local config = unitId and UnitDatabase.GetById(unitId)
 	if not config then return end
@@ -388,7 +393,7 @@ local function beginMove()
 end
 
 local function beginReturn()
-	if not selectedInstanceId then return end
+	if isDeploymentLocked() or not selectedInstanceId then return end
 	local id = selectedInstanceId
 	deselect()
 	local result = ReturnUnit:InvokeServer(id)
@@ -427,6 +432,23 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		end
 	end
 end)
+
+local function updateDeploymentLock()
+	if not isDeploymentLocked() then
+		screen.Enabled = true
+		return
+	end
+
+	isRotating = false
+	rotateBasePivot = nil
+	rotateAngle = 0
+	deselect()
+	PlacementController.Cancel()
+	screen.Enabled = false
+end
+
+player:GetAttributeChangedSignal("DeploymentLocked"):Connect(updateDeploymentLock)
+updateDeploymentLock()
 
 -- Release anywhere (not just over the button) stops an active hold-rotate.
 UserInputService.InputEnded:Connect(function(input)

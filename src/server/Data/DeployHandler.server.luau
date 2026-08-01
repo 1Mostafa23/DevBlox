@@ -71,6 +71,9 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 	if typeof(instanceId) ~= "string" or typeof(position) ~= "Vector3" then
 		return { ok = false, reason = "bad_args" }
 	end
+	if WaveService.IsDeploymentLocked(player) then
+		return { ok = false, reason = "run_active" }
+	end
 
 	-- Validate the player owns this unit.
 	local units = InventoryService.GetUnits(player)
@@ -130,6 +133,9 @@ SetUnitRotation.OnServerInvoke = function(player: Player, instanceId: string, ro
 	if typeof(instanceId) ~= "string" or typeof(rotationY) ~= "number" or rotationY ~= rotationY then
 		return { ok = false, reason = "bad_args" }
 	end
+	if WaveService.IsDeploymentLocked(player) then
+		return { ok = false, reason = "run_active" }
+	end
 
 	local units = InventoryService.GetUnits(player)
 	local unit = units[instanceId]
@@ -148,6 +154,9 @@ end
 ReturnUnit.OnServerInvoke = function(player: Player, instanceId: string)
 	if typeof(instanceId) ~= "string" then
 		return { ok = false, reason = "bad_args" }
+	end
+	if WaveService.IsDeploymentLocked(player) then
+		return { ok = false, reason = "run_active" }
 	end
 
 	local units = InventoryService.GetUnits(player)

@@ -27,6 +27,10 @@ local ghostBoundsOffset: CFrame? = nil
 local ghostBoundsSize: Vector3? = nil
 local currentRotationY = 0
 
+local function isDeploymentLocked(): boolean
+	return player:GetAttribute("DeploymentLocked") == true
+end
+
 local function configureGhostPart(instance: Instance)
 	if instance:IsA("BasePart") then
 		instance.Anchored = true
@@ -122,6 +126,7 @@ local function getPlacement(): (Vector3?, CFrame?, boolean)
 end
 
 function PlacementController.Begin(instanceId: string, modelName: string, rotationY: number?)
+	if isDeploymentLocked() then return end
 	if active then PlacementController.Cancel() end
 	currentRotationY = rotationY or 0
 	local source = DisplayModels:FindFirstChild(modelName)
@@ -158,7 +163,7 @@ function PlacementController.Begin(instanceId: string, modelName: string, rotati
 
 	-- Click/tap to place.
 	clickConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then return end
+		if gameProcessed or isDeploymentLocked() then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			local pos, _, isValid = getPlacement()
@@ -191,5 +196,11 @@ function PlacementController.Cancel()
 	end
 	if ghost then ghost:Destroy(); ghost = nil end
 end
+
+player:GetAttributeChangedSignal("DeploymentLocked"):Connect(function()
+	if isDeploymentLocked() then
+		PlacementController.Cancel()
+	end
+end)
 
 return PlacementController

@@ -10,6 +10,7 @@ local RequestWaveStart = Shared:WaitForChild("Remotes"):WaitForChild("RequestWav
 local RequestWaveStop = Shared:WaitForChild("Remotes"):WaitForChild("RequestWaveStop") :: RemoteEvent
 
 local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local player = Players.LocalPlayer
 local waveGui = playerGui:WaitForChild("WaveGui") :: ScreenGui
 local startButton = waveGui:WaitForChild("StartButton") :: TextButton
 local stopButton = waveGui:WaitForChild("StopButton") :: TextButton
@@ -49,6 +50,12 @@ end
 
 local messageGeneration = 0
 
+local function setDeploymentLocked(locked: boolean)
+	player:SetAttribute("DeploymentLocked", locked)
+end
+
+setDeploymentLocked(false)
+
 local function showMessage(text: string)
 	messageGeneration += 1
 	local generation = messageGeneration
@@ -74,6 +81,7 @@ RequestWaveStart.OnClientEvent:Connect(function(result)
 	if result == "outside_zone" then
 		showMessage("Enter the arena to start the wave")
 	elseif result == "started" then
+		setDeploymentLocked(true)
 		messageGeneration += 1
 		messageLabel.Visible = false
 		countdownLabel.Visible = false
@@ -83,11 +91,13 @@ RequestWaveStart.OnClientEvent:Connect(function(result)
 end)
 
 RequestWaveStop.OnClientEvent:Connect(function(result, remaining)
-	if result == "stopped" then
+	if result == "stopped" or result == "completed" then
+		setDeploymentLocked(false)
 		countdownLabel.Visible = false
 		startButton.Visible = true
 		stopButton.Visible = false
 	elseif result == "defeated" then
+		setDeploymentLocked(false)
 		showMessage("U have lost\n Try Again")
 	elseif result == "countdown" and typeof(remaining) == "number" then
 		countdownLabel.Text = `Return to the arena: {remaining}`

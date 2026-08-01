@@ -477,12 +477,26 @@ local function makeCard(entry: any, layoutOrder: number)
 	clickBtn.ZIndex = 10
 	clickBtn.Parent = card
 	clickBtn.MouseButton1Click:Connect(function()
+		if player:GetAttribute("DeploymentLocked") == true then
+			return
+		end
 		-- fire the placement controller with this unit
 		local PlacementController = require(script.Parent:WaitForChild("PlacementController"))
 		panel.Visible = false  -- close inventory (adjust to your panel's variable)
 		PlacementController.Begin(entry.instanceId, config.ModelName)
 	end)
 end
+
+local function updateDeploymentLock()
+	local locked = player:GetAttribute("DeploymentLocked") == true
+	screen.Enabled = not locked
+	if locked then
+		panel.Visible = false
+	end
+end
+
+player:GetAttributeChangedSignal("DeploymentLocked"):Connect(updateDeploymentLock)
+updateDeploymentLock()
 
 -- =========================================================
 -- INVENTORY REFRESH
