@@ -5,8 +5,8 @@ local Workspace = game:GetService("Workspace")
 
 local WeaponResolver = require(script.Parent.WeaponResolver)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
+local WaveService = require(script.Parent.Parent.spawner.WaveService)
 
-local activeEnemiesFolder = Workspace:WaitForChild("ActiveEnemies")
 local lastAttackTimes: { [Player]: number } = {}
 
 local MeleeCombatService = {}
@@ -19,7 +19,7 @@ local function getEquippedTool(character: Model): Tool?
 	return nil
 end
 
-local function getActiveEnemy(part: BasePart): Model?
+local function getActiveEnemy(part: BasePart, activeEnemiesFolder: Folder): Model?
 	local current: Instance? = part
 	while current and current ~= activeEnemiesFolder do
 		if current:IsA("Model") and current.Parent == activeEnemiesFolder then
@@ -31,6 +31,12 @@ local function getActiveEnemy(part: BasePart): Model?
 end
 
 function MeleeCombatService.TryAttack(player: Player): boolean
+	local runContext = WaveService.GetRunContext(player)
+	if not runContext or not runContext.Started then
+		return false
+	end
+	local activeEnemiesFolder = runContext.ArenaContext.ActiveEnemies
+
 	local character = player.Character
 	if not character or character.Parent == nil then
 		return false
@@ -68,8 +74,14 @@ function MeleeCombatService.TryAttack(player: Player): boolean
 	local damagedCount = 0
 
 	for _, part in parts do
-		local enemy = getActiveEnemy(part)
-		if enemy and not damagedEnemies[enemy] and enemy:GetAttribute("PoolActive") == true then
+		local enemy = getActiveEnemy(part, activeEnemiesFolder)
+		if enemy
+			and not damagedEnemies[enemy]
+			and enemy:GetAttribute("PoolActive") == true
+			and enemy:GetAttribute("OwnerUserId") == runContext.OwnerUserId
+			and enemy:GetAttribute("ArenaId") == runContext.ArenaContext.ArenaId
+			and enemy:GetAttribute("RunGeneration") == runContext.RunGeneration
+		then
 			local enemyHumanoid = enemy:FindFirstChildOfClass("Humanoid")
 			if enemyHumanoid and enemyHumanoid.Health > 0 then
 				damagedEnemies[enemy] = true

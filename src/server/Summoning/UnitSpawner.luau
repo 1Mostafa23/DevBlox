@@ -3,25 +3,19 @@
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UnitDatabase = require(Shared.UnitDatabase)
 local UnitConfig = require(Shared.UnitConfig)
 local RarityConfig = require(Shared.RarityConfig)
+local ArenaContextModule = require(script.Parent.Parent.arena.ArenaContext)
+local RunContextModule = require(script.Parent.Parent.spawner.RunContext)
 local UnitCollisionService = require(script.Parent.Parent.collisions.UnitCollisionService)
 
-local UnitModels = ServerStorage:WaitForChild("UnitModels")
-local deployZone = Workspace:WaitForChild("DeployZone")
-assert(deployZone:IsA("BasePart"), "Workspace.DeployZone must be a BasePart")
+type ArenaContext = ArenaContextModule.ArenaContext
+type RunContext = RunContextModule.RunContext
 
--- A folder in Workspace to hold all deployed units.
-local deployedFolder = Workspace:FindFirstChild("DeployedUnits")
-if not deployedFolder then
-	deployedFolder = Instance.new("Folder")
-	deployedFolder.Name = "DeployedUnits"
-	deployedFolder.Parent = Workspace
-end
+local UnitModels = ServerStorage:WaitForChild("UnitModels")
 
 local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
 
@@ -37,6 +31,8 @@ type PlacementRecord = {
 }
 local placements: { [number]: { [string]: PlacementRecord } } = {}
 local spawnUnit: (
+	ArenaContext,
+	number,
 	Player,
 	string,
 	string,
@@ -45,7 +41,12 @@ local spawnUnit: (
 	CFrame?
 ) -> Model?
 
-local function resolveZoneSurface(position: Vector3, clampOutside: boolean): (Vector3?, Vector3?, boolean)
+local function resolveZoneSurface(
+	arenaContext: ArenaContext,
+	position: Vector3,
+	clampOutside: boolean
+): (Vector3?, Vector3?, boolean)
+	local deployZone = arenaContext.DeployZone
 	local localPosition = deployZone.CFrame:PointToObjectSpace(position)
 	local halfSize = deployZone.Size * 0.5
 	local inside = math.abs(localPosition.X) <= halfSize.X
@@ -63,13 +64,18 @@ local function resolveZoneSurface(position: Vector3, clampOutside: boolean): (Ve
 end
 
 function UnitSpawner.ResolveZonePosition(
+	arenaContext: ArenaContext,
 	position: Vector3,
 	clampOutside: boolean?
 ): (Vector3?, Vector3?, boolean)
-	return resolveZoneSurface(position, clampOutside == true)
+	return resolveZoneSurface(arenaContext, position, clampOutside == true)
 end
 
-function UnitSpawner.ZoneToWorldPosition(zonePosition: Vector3): (Vector3, boolean)
+function UnitSpawner.ZoneToWorldPosition(
+	arenaContext: ArenaContext,
+	zonePosition: Vector3
+): (Vector3, boolean)
+	local deployZone = arenaContext.DeployZone
 	local halfSize = deployZone.Size * 0.5
 	local inside = math.abs(zonePosition.X) <= halfSize.X
 		and math.abs(zonePosition.Z) <= halfSize.Z
@@ -81,8 +87,13 @@ function UnitSpawner.ZoneToWorldPosition(zonePosition: Vector3): (Vector3, boole
 	return deployZone.CFrame:PointToWorldSpace(clampedZonePosition), inside
 end
 
-local function clampHomeCFrame(homeCFrame: CFrame, modelHeight: number, context: string): CFrame
-	local surfacePosition, _, inside = resolveZoneSurface(homeCFrame.Position, true)
+local function clampHomeCFrame(
+	arenaContext: ArenaContext,
+	homeCFrame: CFrame,
+	modelHeight: number,
+	context: string
+): CFrame
+	local surfacePosition, _, inside = resolveZoneSurface(arenaContext, homeCFrame.Position, true)
 	assert(surfacePosition, "Workspace.DeployZone could not resolve a surface position")
 	if inside then
 		return homeCFrame
@@ -92,14 +103,18 @@ local function clampHomeCFrame(homeCFrame: CFrame, modelHeight: number, context:
 	return CFrame.new(surfacePosition + Vector3.new(0, modelHeight / 2, 0)) * homeCFrame.Rotation
 end
 
-local function getLivingUnitCount(): number
+local function getLivingUnitCount(context: RunContext): number
 	local livingCount = 0
-	for _, playerUnits in deployed do
-		for _, model in playerUnits do
-			local humanoid = model:FindFirstChildOfClass("Humanoid")
-			if model:IsDescendantOf(deployedFolder) and humanoid and humanoid.Health > 0 then
-				livingCount += 1
-			end
+	for _, model in deployed[context.OwnerPlayer] or {} do
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if model:IsDescendantOf(context.ArenaContext.DeployedUnits)
+			and model:GetAttribute("OwnerUserId") == context.OwnerUserId
+			and model:GetAttribute("ArenaId") == context.ArenaContext.ArenaId
+			and model:GetAttribute("RunGeneration") == context.RunGeneration
+			and humanoid
+			and humanoid.Health > 0
+		then
+			livingCount += 1
 		end
 	end
 	return livingCount
@@ -166,15 +181,65 @@ local function removeRuntimeUnit(
 	return true
 end
 
-function UnitSpawner.BeginRun()
-	deadForRun = {}
+local function bindDeathCleanup(
+	player: Player,
+	instanceId: string,
+	model: Model,
+	arenaId: string,
+	runGeneration: number
+)
+	local existing = deathConnections[model]
+	if existing then
+		existing:Disconnect()
+	end
+
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		deathConnections[model] = nil
+		return
+	end
+
+	deathConnections[model] = humanoid.Died:Connect(function()
+		if model:GetAttribute("OwnerUserId") ~= player.UserId
+			or model:GetAttribute("ArenaId") ~= arenaId
+			or model:GetAttribute("RunGeneration") ~= runGeneration
+		then
+			return
+		end
+		removeRuntimeUnit(player, instanceId, model, true)
+	end)
 end
 
-function UnitSpawner.EndRun()
+function UnitSpawner.BeginRun(context: RunContext)
+	local player = context.OwnerPlayer
+	deadForRun[context.OwnerUserId] = {}
+	for _, model in deployed[player] or {} do
+		if not model:IsDescendantOf(context.ArenaContext.DeployedUnits) then
+			continue
+		end
+		model:SetAttribute("OwnerUserId", context.OwnerUserId)
+		model:SetAttribute("ArenaId", context.ArenaContext.ArenaId)
+		model:SetAttribute("RunGeneration", context.RunGeneration)
+		local instanceId = model:GetAttribute("InstanceId")
+		if typeof(instanceId) == "string" then
+			bindDeathCleanup(
+				player,
+				instanceId,
+				model,
+				context.ArenaContext.ArenaId,
+				context.RunGeneration
+			)
+		end
+		UnitFollowService.Unregister(model)
+		UnitFollowService.Register(model, context.ArenaContext)
+	end
 end
 
-function UnitSpawner.GetLivingUnitCount(): number
-	return getLivingUnitCount()
+function UnitSpawner.EndRun(_context: RunContext)
+end
+
+function UnitSpawner.GetLivingUnitCount(context: RunContext): number
+	return getLivingUnitCount(context)
 end
 
 function UnitSpawner.IsUnavailableForRun(player: Player, instanceId: string): boolean
@@ -182,26 +247,19 @@ function UnitSpawner.IsUnavailableForRun(player: Player, instanceId: string): bo
 	return playerDeadUnits ~= nil and playerDeadUnits[instanceId] == true
 end
 
-function UnitSpawner.RestoreAllForNextRun()
-	deadForRun = {}
+function UnitSpawner.RestoreAllForNextRun(context: RunContext)
+	local player = context.OwnerPlayer
+	deadForRun[player.UserId] = nil
 
-	local records: { { player: Player, instanceId: string, placement: PlacementRecord } } = {}
-	for userId, playerPlacements in placements do
-		local player = Players:GetPlayerByUserId(userId)
-		if not player then
-			continue
-		end
-		for instanceId, placement in playerPlacements do
-			table.insert(records, {
-				player = player,
-				instanceId = instanceId,
-				placement = placement,
-			})
-		end
+	local records: { { instanceId: string, placement: PlacementRecord } } = {}
+	for instanceId, placement in placements[player.UserId] or {} do
+		table.insert(records, {
+			instanceId = instanceId,
+			placement = placement,
+		})
 	end
 
 	for _, record in records do
-		local player = record.player
 		local instanceId = record.instanceId
 		local placement = record.placement
 		local playerUnits = deployed[player]
@@ -217,22 +275,35 @@ function UnitSpawner.RestoreAllForNextRun()
 				UnitFollowService.Unregister(model)
 				local _, size = model:GetBoundingBox()
 				local homeCFrame = clampHomeCFrame(
+					context.ArenaContext,
 					placement.homeCFrame,
 					size.Y,
 					`{player.Name}/{instanceId}`
 				)
 				placement.homeCFrame = homeCFrame
 				model:SetAttribute("HomeCFrame", homeCFrame)
+				model:SetAttribute("OwnerUserId", context.OwnerUserId)
+				model:SetAttribute("ArenaId", context.ArenaContext.ArenaId)
+				model:SetAttribute("RunGeneration", context.RunGeneration)
+				bindDeathCleanup(
+					player,
+					instanceId,
+					model,
+					context.ArenaContext.ArenaId,
+					context.RunGeneration
+				)
 				model:PivotTo(homeCFrame)
 				humanoid.MaxHealth = stats.MaxHealth
 				humanoid.Health = humanoid.MaxHealth
-				UnitFollowService.Register(model)
+				UnitFollowService.Register(model, context.ArenaContext)
 			end
 		else
 			if model then
 				removeRuntimeUnit(player, instanceId, model, false)
 			end
 			spawnUnit(
+				context.ArenaContext,
+				context.RunGeneration,
 				player,
 				instanceId,
 				placement.unitId,
@@ -245,6 +316,8 @@ function UnitSpawner.RestoreAllForNextRun()
 end
 
 spawnUnit = function(
+	arenaContext: ArenaContext,
+	runGeneration: number,
 	player: Player,
 	instanceId: string,
 	unitId: string,
@@ -288,10 +361,15 @@ spawnUnit = function(
 	local _, size = model:GetBoundingBox()
 	local homeCFrame = authoritativeHomeCFrame
 	if homeCFrame then
-		homeCFrame = clampHomeCFrame(homeCFrame, size.Y, `{player.Name}/{instanceId}`)
+		homeCFrame = clampHomeCFrame(
+			arenaContext,
+			homeCFrame,
+			size.Y,
+			`{player.Name}/{instanceId}`
+		)
 	else
 		assert(position, "UnitSpawner.Spawn requires a deployment position")
-		local surfacePosition, _, inside = resolveZoneSurface(position, true)
+		local surfacePosition, _, inside = resolveZoneSurface(arenaContext, position, true)
 		assert(surfacePosition, "Workspace.DeployZone could not resolve a surface position")
 		if not inside then
 			warn(`[UnitSpawner] placement outside Workspace.DeployZone for {player.Name}/{instanceId}; clamping inside zone`)
@@ -302,22 +380,20 @@ spawnUnit = function(
 	model:PivotTo(homeCFrame)
 	model:SetAttribute("HomeCFrame", homeCFrame)
 	makeLabel(model, config)
-	model.Parent = deployedFolder
 	model:SetAttribute("InstanceId", instanceId)
 	model:SetAttribute("OwnerUserId", player.UserId)
-	model:SetAttribute("UnitId", unitId)   -- ADD THIS
+	model:SetAttribute("ArenaId", arenaContext.ArenaId)
+	model:SetAttribute("RunGeneration", runGeneration)
+	model:SetAttribute("UnitId", unitId)
+	model.Parent = arenaContext.DeployedUnits
 
 	-- Set collision group AFTER parenting so the Humanoid can't override it.
 	UnitCollisionService.RegisterUnit(model)
-	UnitFollowService.Register(model)
+	UnitFollowService.Register(model, arenaContext)
 
 	deployed[player] = deployed[player] or {}
 	deployed[player][instanceId] = model
-	if hum then
-		deathConnections[model] = hum.Died:Connect(function()
-			removeRuntimeUnit(player, instanceId, model, true)
-		end)
-	end
+	bindDeathCleanup(player, instanceId, model, arenaContext.ArenaId, runGeneration)
 	placements[player.UserId] = placements[player.UserId] or {}
 	placements[player.UserId][instanceId] = {
 		unitId = unitId,
@@ -328,13 +404,24 @@ end
 
 -- Spawns a deployed unit for a player at a position, facing rotationY (radians, optional).
 function UnitSpawner.Spawn(
+	arenaContext: ArenaContext,
+	runGeneration: number,
 	player: Player,
 	instanceId: string,
 	unitId: string,
 	position: Vector3,
 	rotationY: number?
 ): Model?
-	return spawnUnit(player, instanceId, unitId, position, rotationY, nil)
+	return spawnUnit(
+		arenaContext,
+		runGeneration,
+		player,
+		instanceId,
+		unitId,
+		position,
+		rotationY,
+		nil
+	)
 end
 
 function UnitSpawner.UpdateHomeRotation(player: Player, instanceId: string, rotationY: number): boolean

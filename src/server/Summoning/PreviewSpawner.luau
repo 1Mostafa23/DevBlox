@@ -7,18 +7,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UnitDatabase = require(Shared.UnitDatabase)
 local RarityConfig = require(Shared.RarityConfig)
+local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 
 local UnitModels = ServerStorage:WaitForChild("UnitModels")
+local arena = ArenaService.GetCurrent()
 
 local PreviewSpawner = {}
 
 -- Find the altar's preview spot. Returns the CFrame to place the NPC.
 local function getSpotCFrame(): CFrame?
-	local altar = Workspace:FindFirstChild("SummonAltar")
-	if not altar then return nil end
-	local spot = altar:FindFirstChild("PreviewSpot", true) -- recursive
-	if not spot or not spot:IsA("BasePart") then return nil end
-	return spot.CFrame
+	return arena.PreviewLocation.CFrame
 end
 
 -- Builds a floating name + rarity label above the model.

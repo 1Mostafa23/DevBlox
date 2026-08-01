@@ -1,76 +1,82 @@
 --!strict
 
+local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local EnemySpawner = require(script.Parent.EnemySpawner)
 local EnemyPool = require(script.Parent.EnemyPool)
 local EnemyFollowService = require(script.Parent.Parent.enemies.EnemyFollowService)
 local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
 local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
+local RunContextModule = require(script.Parent.RunContext)
 local WaveConfig = require(script.Parent.WaveConfig)
 
-type State = "Idle" | "Spawning" | "Fighting" | "Intermission" | "Finished"
+type RunContext = RunContextModule.RunContext
+type State = RunContextModule.State
 
 local TOTAL_WAVES = 10
 
 local WaveService = {}
-local currentState: State = "Idle"
-local started = false
-local currentRunOwner: Player? = nil
-local runGeneration = 0
-local spawnGenerations: { [Model]: number } = {}
-local activeCleanups: { [Model]: () -> () } = {}
+local runContexts: { [Player]: RunContext } = {}
 
-local function setState(state: State)
-	currentState = state
+local function setState(context: RunContext, state: State)
+	context.State = state
 end
 
-function WaveService.GetState(): State
-	return currentState
+local function isRunActive(context: RunContext, generation: number): boolean
+	return context.Started and context.RunGeneration == generation
 end
 
-local function isRunActive(generation: number): boolean
-	return started and runGeneration == generation
-end
-
-function WaveService.Start(owner: Player): boolean
-	if started then
-		return false
+function WaveService.GetOrCreateRunContext(owner: Player): RunContext
+	local existing = runContexts[owner]
+	if existing then
+		return existing
 	end
 
-	started = true
-	currentRunOwner = owner
-	EnemyFollowService.SetRunOwner(owner)
-	runGeneration += 1
-	local generation = runGeneration
-	UnitSpawner.BeginRun()
+	local context = RunContextModule.new(owner, ArenaService.GetCurrent())
+	runContexts[owner] = context
+	return context
+end
+
+function WaveService.GetRunContext(owner: Player): RunContext?
+	return runContexts[owner]
+end
+
+function WaveService.GetState(owner: Player): State
+	local context = runContexts[owner]
+	return if context then context.State else "Idle"
+end
+
+local function runWaves(context: RunContext, generation: number)
+	local owner = context.OwnerPlayer
 
 	for waveNumber = 1, TOTAL_WAVES do
-		if not isRunActive(generation) then
-			return false
+		if not isRunActive(context, generation) then
+			return
 		end
 
+		context.CurrentWave = waveNumber
 		local wave = WaveConfig[waveNumber]
 		assert(wave, `Missing configuration for wave {waveNumber}`)
 
 		local aliveCount = 0
-		EnemyFollowService.BeginWave()
-		UnitFollowService.BeginWave()
-		setState("Spawning")
+		EnemyFollowService.BeginWave(context)
+		UnitFollowService.BeginWave(context)
+		setState(context, "Spawning")
 
 		for enemyNumber = 1, wave.enemyCount do
-			if not isRunActive(generation) then
-				return false
+			if not isRunActive(context, generation) then
+				return
 			end
 
-			local enemy = EnemySpawner.Spawn()
+			local enemy = EnemySpawner.Spawn(context)
 			local humanoid = enemy:FindFirstChildOfClass("Humanoid")
 			assert(humanoid, `Spawned enemy for wave {waveNumber} must contain a Humanoid`)
 
-			local spawnGeneration = (spawnGenerations[enemy] or 0) + 1
-			spawnGenerations[enemy] = spawnGeneration
+			context.SpawnGenerations[enemy] = (context.SpawnGenerations[enemy] or 0) + 1
 			aliveCount += 1
 			local cleanupHandled = false
 			local deathConnection: RBXScriptConnection? = nil
+			local enemyRunGeneration = generation
 
 			local function cleanup()
 				if cleanupHandled then
@@ -83,101 +89,111 @@ function WaveService.Start(owner: Player): boolean
 					deathConnection = nil
 				end
 
-				activeCleanups[enemy] = nil
-				EnemyFollowService.Unregister(enemy)
 				aliveCount = math.max(0, aliveCount - 1)
-				EnemyPool.Release(enemy)
+				context.ActiveCleanups[enemy] = nil
+				if enemy:GetAttribute("OwnerUserId") == context.OwnerUserId
+					and enemy:GetAttribute("ArenaId") == context.ArenaContext.ArenaId
+					and enemy:GetAttribute("RunGeneration") == enemyRunGeneration
+				then
+					EnemyFollowService.Unregister(enemy)
+					EnemyPool.Release(enemy)
+				end
 			end
 
-			activeCleanups[enemy] = cleanup
+			context.ActiveCleanups[enemy] = cleanup
 			deathConnection = humanoid.Died:Connect(cleanup)
-
-			-- TEMPORARY TEST CODE: remove this entire block when real enemy cleanup is available.
-			--task.spawn(function()
-				--task.wait(30)
-				--if cleanupHandled
-				--	or spawnGenerations[enemy] ~= spawnGeneration
-				--	or enemy:GetAttribute("PoolActive") ~= true
-				--then
-				--	return
-				--end
-
-				--cleanup()
-			--end)
-			-- END TEMPORARY TEST CODE
 
 			if enemyNumber < wave.enemyCount then
 				task.wait(wave.spawnInterval)
 			end
 		end
 
-		if not isRunActive(generation) then
-			return false
+		if not isRunActive(context, generation) then
+			return
 		end
 
-		setState("Fighting")
-		while aliveCount > 0 and isRunActive(generation) do
+		setState(context, "Fighting")
+		while aliveCount > 0 and isRunActive(context, generation) do
 			task.wait()
 		end
 
-		if not isRunActive(generation) then
-			return false
+		if not isRunActive(context, generation) then
+			return
 		end
 
-		EnemyFollowService.EndWave()
-		UnitFollowService.ReturnAllToHome()
-		if not isRunActive(generation) then
-			return false
+		EnemyFollowService.EndWave(context)
+		UnitFollowService.ReturnAllToHome(context)
+		if not isRunActive(context, generation) then
+			return
 		end
-		setState("Intermission")
+		setState(context, "Intermission")
 		task.wait(wave.intermission)
 	end
 
-	if not isRunActive(generation) then
+	if not isRunActive(context, generation) then
+		return
+	end
+
+	UnitSpawner.EndRun(context)
+	PlayerHealthService.Reset(owner)
+	setState(context, "Finished")
+end
+
+function WaveService.Start(owner: Player): boolean
+	local context = WaveService.GetOrCreateRunContext(owner)
+	if context.Started then
 		return false
 	end
 
-	UnitSpawner.EndRun()
-	local completedRunOwner = currentRunOwner
-	currentRunOwner = nil
-	EnemyFollowService.SetRunOwner(nil)
-	if completedRunOwner then
-		PlayerHealthService.Reset(completedRunOwner)
-	end
-	setState("Finished")
+	context.Started = true
+	context.StartRequested = true
+	context.CurrentWave = 0
+	context.RunGeneration += 1
+	context.FeedbackGeneration = nil
+	context.SpawnGenerations = {}
+	context.ActiveCleanups = {}
+	local generation = context.RunGeneration
+	UnitSpawner.BeginRun(context)
+	task.spawn(runWaves, context, generation)
 	return true
 end
 
-function WaveService.Stop(): boolean
-	if not started then
+function WaveService.Stop(owner: Player, _reason: string?): boolean
+	local context = runContexts[owner]
+	if not context or not context.Started then
 		return false
 	end
 
-	started = false
-	local stoppedRunOwner = currentRunOwner
-	currentRunOwner = nil
-	EnemyFollowService.SetRunOwner(nil)
-	runGeneration += 1
-	setState("Idle")
-	EnemyFollowService.EndWave()
+	context.Started = false
+	context.StartRequested = false
+	setState(context, "Idle")
+	EnemyFollowService.EndWave(context)
+	UnitFollowService.ResetAllToHome(context)
+	context.RunGeneration += 1
 
 	local cleanups: { () -> () } = {}
-	for _, cleanup in activeCleanups do
+	for _, cleanup in context.ActiveCleanups do
 		table.insert(cleanups, cleanup)
 	end
 
 	for _, cleanup in cleanups do
 		cleanup()
 	end
-	activeCleanups = {}
-	spawnGenerations = {}
-	UnitFollowService.ResetAllToHome()
-	UnitSpawner.RestoreAllForNextRun()
-	if stoppedRunOwner then
-		PlayerHealthService.Reset(stoppedRunOwner)
-	end
+	context.ActiveCleanups = {}
+	context.SpawnGenerations = {}
+	context.CurrentWave = 0
+	UnitSpawner.RestoreAllForNextRun(context)
+	PlayerHealthService.Reset(owner)
 
 	return true
+end
+
+function WaveService.RemoveRunContext(owner: Player)
+	local context = runContexts[owner]
+	if context and context.Started then
+		WaveService.Stop(owner, "player_left")
+	end
+	runContexts[owner] = nil
 end
 
 return WaveService

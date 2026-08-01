@@ -2,11 +2,15 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UnitConfig = require(Shared:WaitForChild("UnitConfig"))
 local UnitDatabase = require(Shared:WaitForChild("UnitDatabase"))
+local ArenaContextModule = require(script.Parent.Parent.arena.ArenaContext)
+local RunContextModule = require(script.Parent.Parent.spawner.RunContext)
+
+type ArenaContext = ArenaContextModule.ArenaContext
+type RunContext = RunContextModule.RunContext
 
 local UPDATE_INTERVAL = 0.2
 local TARGET_REFRESH_INTERVAL = 0.8
@@ -31,6 +35,11 @@ type Target = {
 
 type Registration = {
 	unit: Model,
+	ownerUserId: number,
+	arenaId: string,
+	runGeneration: number,
+	arenaContext: ArenaContext,
+	waveActive: boolean,
 	humanoid: Humanoid,
 	rootPart: BasePart,
 	state: MovementState,
@@ -47,22 +56,24 @@ type Registration = {
 	facingAlignment: AlignOrientation,
 }
 
-local activeEnemiesFolder = Workspace:WaitForChild("ActiveEnemies")
-local deployedUnitsFolder = Workspace:WaitForChild("DeployedUnits")
-assert(activeEnemiesFolder:IsA("Folder"), "Workspace.ActiveEnemies must be a Folder")
-assert(deployedUnitsFolder:IsA("Folder"), "Workspace.DeployedUnits must be a Folder")
-local bossTrigger = Workspace:WaitForChild("Map")
-	:WaitForChild("BossZone")
-	:WaitForChild("BossTrigger")
-assert(bossTrigger:IsA("BasePart"), "Workspace.Map.BossZone.BossTrigger must be a BasePart")
-
 local registrations: { [Model]: Registration } = {}
+local activeRuns: { [string]: boolean } = {}
 local rng = Random.new()
-local waveActive = false
 
 local UnitFollowService = {}
 
-local function isInsideBossTrigger(position: Vector3): boolean
+local function getRunKey(ownerUserId: number, arenaId: string, runGeneration: number): string
+	return `{ownerUserId}:{arenaId}:{runGeneration}`
+end
+
+local function matchesRun(model: Model, registration: Registration): boolean
+	return model:GetAttribute("OwnerUserId") == registration.ownerUserId
+		and model:GetAttribute("ArenaId") == registration.arenaId
+		and model:GetAttribute("RunGeneration") == registration.runGeneration
+end
+
+local function isInsideBossTrigger(registration: Registration, position: Vector3): boolean
+	local bossTrigger = registration.arenaContext.BossTrigger
 	local localPosition = bossTrigger.CFrame:PointToObjectSpace(position)
 	local halfSize = bossTrigger.Size * 0.5
 
@@ -70,19 +81,23 @@ local function isInsideBossTrigger(position: Vector3): boolean
 		and math.abs(localPosition.Z) <= halfSize.Z
 end
 
-local function isTargetValid(target: Target): boolean
+local function isTargetValid(registration: Registration, target: Target): boolean
 	return target.model:GetAttribute("PoolActive") == true
-		and target.model:IsDescendantOf(activeEnemiesFolder)
+		and matchesRun(target.model, registration)
+		and target.model:IsDescendantOf(registration.arenaContext.ActiveEnemies)
 		and target.humanoid.Health > 0
 		and target.rootPart.Parent ~= nil
-		and isInsideBossTrigger(target.rootPart.Position)
+		and isInsideBossTrigger(registration, target.rootPart.Position)
 end
 
-local function getLivingTargets(): { Target }
+local function getLivingTargets(registration: Registration): { Target }
 	local targets: { Target } = {}
 
-	for _, enemy in activeEnemiesFolder:GetChildren() do
+	for _, enemy in registration.arenaContext.ActiveEnemies:GetChildren() do
 		if not enemy:IsA("Model") or enemy:GetAttribute("PoolActive") ~= true then
+			continue
+		end
+		if not matchesRun(enemy, registration) then
 			continue
 		end
 
@@ -92,7 +107,7 @@ local function getLivingTargets(): { Target }
 			and humanoid.Health > 0
 			and rootPart
 			and rootPart:IsA("BasePart")
-			and isInsideBossTrigger(rootPart.Position)
+			and isInsideBossTrigger(registration, rootPart.Position)
 		then
 			table.insert(targets, {
 				model = enemy,
@@ -171,10 +186,10 @@ end
 
 local function tryAttack(registration: Registration, target: Target)
 	local now = time()
-	if not waveActive
+	if not registration.waveActive
 		or now < registration.nextAttackTime
 		or registration.humanoid.Health <= 0
-		or not isTargetValid(target)
+		or not isTargetValid(registration, target)
 		or (target.rootPart.Position - registration.rootPart.Position).Magnitude
 			> registration.attackRange
 	then
@@ -185,18 +200,26 @@ local function tryAttack(registration: Registration, target: Target)
 	target.humanoid:TakeDamage(registration.damage)
 end
 
-function UnitFollowService.Register(unit: Model)
+function UnitFollowService.Register(unit: Model, arenaContext: ArenaContext)
 	if registrations[unit] then
 		return
 	end
 
 	local unitId = unit:GetAttribute("UnitId")
+	local ownerUserId = unit:GetAttribute("OwnerUserId")
+	local arenaId = unit:GetAttribute("ArenaId")
+	local runGeneration = unit:GetAttribute("RunGeneration")
 	local definition = if typeof(unitId) == "string" then UnitDatabase.GetById(unitId) else nil
 	local archetype = definition and UnitConfig.GetArchetype(definition.Archetype)
 	local rarityMultiplier = definition and UnitConfig.GetRarityMultiplier(definition.Rarity)
 	local humanoid = unit:FindFirstChildOfClass("Humanoid")
 	local rootPart = unit:FindFirstChild("HumanoidRootPart")
 	if not definition
+		or typeof(ownerUserId) ~= "number"
+		or typeof(arenaId) ~= "string"
+		or typeof(runGeneration) ~= "number"
+		or arenaId ~= arenaContext.ArenaId
+		or not unit:IsDescendantOf(arenaContext.DeployedUnits)
 		or not archetype
 		or not rarityMultiplier
 		or not humanoid
@@ -207,6 +230,7 @@ function UnitFollowService.Register(unit: Model)
 	end
 
 	local stats = UnitConfig.ApplyMultipliers(archetype, rarityMultiplier)
+	local runKey = getRunKey(ownerUserId, arenaId, runGeneration)
 	local facingAttachment = Instance.new("Attachment")
 	facingAttachment.Name = "UnitFacingAttachment"
 	facingAttachment.Parent = rootPart
@@ -226,9 +250,14 @@ function UnitFollowService.Register(unit: Model)
 	humanoid.AutoRotate = true
 	local registration: Registration = {
 		unit = unit,
+		ownerUserId = ownerUserId,
+		arenaId = arenaId,
+		runGeneration = runGeneration,
+		arenaContext = arenaContext,
+		waveActive = activeRuns[runKey] == true,
 		humanoid = humanoid,
 		rootPart = rootPart,
-		state = if waveActive then "Chasing" else "Idle",
+		state = if activeRuns[runKey] then "Chasing" else "Idle",
 		target = nil,
 		offset = nil,
 		stopDistance = math.max(
@@ -265,9 +294,17 @@ function UnitFollowService.Unregister(unit: Model)
 	registrations[unit] = nil
 end
 
-function UnitFollowService.BeginWave()
-	waveActive = true
+function UnitFollowService.BeginWave(context: RunContext)
+	local runKey = getRunKey(context.OwnerUserId, context.ArenaContext.ArenaId, context.RunGeneration)
+	activeRuns[runKey] = true
 	for _, registration in registrations do
+		if registration.ownerUserId ~= context.OwnerUserId
+			or registration.arenaId ~= context.ArenaContext.ArenaId
+			or registration.runGeneration ~= context.RunGeneration
+		then
+			continue
+		end
+		registration.waveActive = true
 		setTarget(registration, nil)
 		registration.nextAttackTime = 0
 		registration.nextTargetRefresh = 0
@@ -275,9 +312,17 @@ function UnitFollowService.BeginWave()
 	end
 end
 
-function UnitFollowService.ResetAllToHome()
-	waveActive = false
+function UnitFollowService.ResetAllToHome(context: RunContext)
+	local runKey = getRunKey(context.OwnerUserId, context.ArenaContext.ArenaId, context.RunGeneration)
+	activeRuns[runKey] = nil
 	for unit, registration in registrations do
+		if registration.ownerUserId ~= context.OwnerUserId
+			or registration.arenaId ~= context.ArenaContext.ArenaId
+			or registration.runGeneration ~= context.RunGeneration
+		then
+			continue
+		end
+		registration.waveActive = false
 		setTarget(registration, nil)
 		registration.nextAttackTime = 0
 		registration.nextTargetRefresh = 0
@@ -285,7 +330,7 @@ function UnitFollowService.ResetAllToHome()
 
 		local homeCFrame = unit:GetAttribute("HomeCFrame")
 		if registration.humanoid.Health > 0
-			and unit:IsDescendantOf(deployedUnitsFolder)
+			and unit:IsDescendantOf(context.ArenaContext.DeployedUnits)
 			and typeof(homeCFrame) == "CFrame"
 		then
 			for _, descendant in unit:GetDescendants() do
@@ -299,16 +344,24 @@ function UnitFollowService.ResetAllToHome()
 	end
 end
 
-function UnitFollowService.ReturnAllToHome()
-	waveActive = false
+function UnitFollowService.ReturnAllToHome(context: RunContext)
+	local runKey = getRunKey(context.OwnerUserId, context.ArenaContext.ArenaId, context.RunGeneration)
+	activeRuns[runKey] = nil
 	for unit, registration in registrations do
+		if registration.ownerUserId ~= context.OwnerUserId
+			or registration.arenaId ~= context.ArenaContext.ArenaId
+			or registration.runGeneration ~= context.RunGeneration
+		then
+			continue
+		end
+		registration.waveActive = false
 		setTarget(registration, nil)
 		registration.nextAttackTime = 0
 		registration.nextTargetRefresh = 0
 
 		local homeCFrame = unit:GetAttribute("HomeCFrame")
 		if registration.humanoid.Health > 0
-			and unit:IsDescendantOf(deployedUnitsFolder)
+			and unit:IsDescendantOf(context.ArenaContext.DeployedUnits)
 			and typeof(homeCFrame) == "CFrame"
 		then
 			registration.returnDeadline = time() + HOME_RETURN_TIMEOUT
@@ -321,7 +374,11 @@ function UnitFollowService.ReturnAllToHome()
 	while true do
 		local hasReturningUnit = false
 		for _, registration in registrations do
-			if registration.state == "Returning" then
+			if registration.ownerUserId == context.OwnerUserId
+				and registration.arenaId == context.ArenaContext.ArenaId
+				and registration.runGeneration == context.RunGeneration
+				and registration.state == "Returning"
+			then
 				hasReturningUnit = true
 				break
 			end
@@ -338,8 +395,9 @@ RunService.Heartbeat:Connect(function()
 		local target = registration.target
 		if registration.state ~= "Engaged"
 			or not target
-			or not unit:IsDescendantOf(deployedUnitsFolder)
-			or not isTargetValid(target)
+			or not unit:IsDescendantOf(registration.arenaContext.DeployedUnits)
+			or not matchesRun(unit, registration)
+			or not isTargetValid(registration, target)
 		then
 			registration.facingAlignment.Enabled = false
 			continue
@@ -360,12 +418,11 @@ end)
 task.spawn(function()
 	while true do
 		local now = time()
-		local targets = if waveActive then getLivingTargets() else {}
-
 		for unit, registration in registrations do
 			local humanoid = registration.humanoid
 			local rootPart = registration.rootPart
-			if not unit:IsDescendantOf(deployedUnitsFolder)
+			if not unit:IsDescendantOf(registration.arenaContext.DeployedUnits)
+				or not matchesRun(unit, registration)
 				or humanoid.Health <= 0
 				or rootPart.Parent == nil
 			then
@@ -394,21 +451,21 @@ task.spawn(function()
 				continue
 			end
 
-			if not waveActive then
+			if not registration.waveActive then
 				setTarget(registration, nil)
 				setMovementState(registration, "Idle")
 				continue
 			end
 
 			local target = registration.target
-			if target and not isTargetValid(target) then
+			if target and not isTargetValid(registration, target) then
 				setTarget(registration, nil)
 				target = nil
 				registration.nextTargetRefresh = 0
 			end
 
 			if not target or now >= registration.nextTargetRefresh then
-				target = findNearestTarget(rootPart.Position, targets)
+				target = findNearestTarget(rootPart.Position, getLivingTargets(registration))
 				setTarget(registration, target)
 				registration.nextTargetRefresh = now + TARGET_REFRESH_INTERVAL
 			end
@@ -421,7 +478,7 @@ task.spawn(function()
 
 			local distance = (target.rootPart.Position - rootPart.Position).Magnitude
 			tryAttack(registration, target)
-			if not isTargetValid(target) then
+			if not isTargetValid(registration, target) then
 				setTarget(registration, nil)
 				registration.nextTargetRefresh = 0
 				setMovementState(registration, "Chasing")

@@ -6,7 +6,9 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local InventoryService = require(script.Parent.InventoryService)
+local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
+local WaveService = require(script.Parent.Parent.spawner.WaveService)
 local UnitDatabase = require(Shared.UnitDatabase)
 
 local UnitModels = ServerStorage:WaitForChild("UnitModels")
@@ -16,6 +18,7 @@ local RemotesFolder = Shared:WaitForChild("Remotes")
 local DeployUnit = RemotesFolder:WaitForChild("DeployUnit") :: RemoteFunction
 local ReturnUnit = RemotesFolder:WaitForChild("ReturnUnit") :: RemoteFunction
 local SetUnitRotation = RemotesFolder:WaitForChild("SetUnitRotation") :: RemoteFunction
+local arenaContext = ArenaService.GetCurrent()
 
 local function findDeployedModel(instance: Instance, deployedFolder: Instance): Model?
 	local current: Instance? = instance
@@ -28,7 +31,12 @@ local function findDeployedModel(instance: Instance, deployedFolder: Instance): 
 	return nil
 end
 
-local function isOccupied(unitId: string, instanceId: string, position: Vector3): boolean?
+local function isOccupied(
+	unitId: string,
+	instanceId: string,
+	position: Vector3,
+	deployedUnitsFolder: Folder
+): boolean?
 	local config = UnitDatabase.GetById(unitId)
 	if not config then
 		return nil
@@ -44,17 +52,12 @@ local function isOccupied(unitId: string, instanceId: string, position: Vector3)
 	local proposedPivot = CFrame.new(position + Vector3.new(0, boundsSize.Y / 2, 0))
 	local proposedBounds = proposedPivot * boundsOffset
 
-	local deployedFolder = Workspace:FindFirstChild("DeployedUnits")
-	if not deployedFolder then
-		return false
-	end
-
 	local params = OverlapParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { deployedFolder }
+	params.FilterDescendantsInstances = { deployedUnitsFolder }
 
 	for _, part in Workspace:GetPartBoundsInBox(proposedBounds, boundsSize, params) do
-		local model = findDeployedModel(part, deployedFolder)
+		local model = findDeployedModel(part, deployedUnitsFolder)
 		if model and model:GetAttribute("InstanceId") ~= instanceId then
 			return true
 		end
@@ -78,14 +81,26 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 	if UnitSpawner.IsUnavailableForRun(player, instanceId) then
 		return { ok = false, reason = "unit_dead" }
 	end
+	local runContext = WaveService.GetRunContext(player)
+	local playerArenaContext = if runContext then runContext.ArenaContext else arenaContext
+	local runGeneration = if runContext then runContext.RunGeneration else 0
 
 	-- Validate and project placement onto the designated zone's top surface.
-	local zoneWorldPosition, zonePosition, isInsideZone = UnitSpawner.ResolveZonePosition(position, false)
+	local zoneWorldPosition, zonePosition, isInsideZone = UnitSpawner.ResolveZonePosition(
+		playerArenaContext,
+		position,
+		false
+	)
 	if not isInsideZone or not zoneWorldPosition or not zonePosition then
 		return { ok = false, reason = "out_of_zone" }
 	end
 
-	local occupied = isOccupied(unit.UnitId, instanceId, zoneWorldPosition)
+	local occupied = isOccupied(
+		unit.UnitId,
+		instanceId,
+		zoneWorldPosition,
+		playerArenaContext.DeployedUnits
+	)
 	if occupied == nil then
 		return { ok = false, reason = "invalid_unit" }
 	end
@@ -94,7 +109,15 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 	end
 
 	-- Spawn at the validated zone position, then persist its world and zone-local position.
-	local model = UnitSpawner.Spawn(player, instanceId, unit.UnitId, zoneWorldPosition, unit.RotationY)
+	local model = UnitSpawner.Spawn(
+		playerArenaContext,
+		runGeneration,
+		player,
+		instanceId,
+		unit.UnitId,
+		zoneWorldPosition,
+		unit.RotationY
+	)
 	if not model then
 		return { ok = false, reason = "spawn_failed" }
 	end

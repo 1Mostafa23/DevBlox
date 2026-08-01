@@ -53,14 +53,80 @@
     "Lighting": {
       "$properties": {
         "Ambient": [
-          0,
-          0,
-          0
+          0.47058824,
+          0.49019608,
+          0.54901961
         ],
-        "Brightness": 2,
+        "OutdoorAmbient": [
+          0.60784314,
+          0.62745098,
+          0.68627451
+        ],
+        "Brightness": 2.25,
+        "ExposureCompensation": -0.05,
+        "EnvironmentDiffuseScale": 0.35,
+        "EnvironmentSpecularScale": 0.08,
         "GlobalShadows": true,
+        "ShadowSoftness": 0.6,
+        "ClockTime": 13.5,
         "Outlines": false,
-        "Technology": "Voxel"
+        "Technology": "Future"
+      },
+      "Atmosphere": {
+        "$className": "Atmosphere",
+        "$properties": {
+          "Color": [
+            0.7843,
+            0.6667,
+            0.4235
+          ],
+          "Decay": [
+            0.3608,
+            0.2353,
+            0.0549
+          ],
+          "Density": 0.22,
+          "Offset": 0,
+          "Glare": 0.15,
+          "Haze": 0
+        }
+      },
+      "SunRays": {
+        "$className": "SunRaysEffect",
+        "$properties": {
+          "Enabled": true,
+          "Intensity": 0.03,
+          "Spread": 0.8
+        }
+      },
+      "ColorCorrection": {
+        "$className": "ColorCorrectionEffect",
+        "$properties": {
+          "Enabled": true,
+          "Brightness": 0,
+          "Contrast": 0.02,
+          "Saturation": -0.02,
+          "TintColor": [
+            0.98039216,
+            0.98039216,
+            1
+          ]
+        }
+      },
+      "Stylized": {
+        "$className": "Sky",
+        "$properties": {
+          "SkyboxBk": "rbxassetid://18351376859",
+          "SkyboxDn": "rbxassetid://18351374919",
+          "SkyboxFt": "rbxassetid://18351376800",
+          "SkyboxLf": "rbxassetid://18351376469",
+          "SkyboxRt": "rbxassetid://18351376457",
+          "SkyboxUp": "rbxassetid://18351377189",
+          "CelestialBodiesShown": true,
+          "SunAngularSize": 21,
+          "MoonAngularSize": 11,
+          "StarCount": 3000
+        }
       }
     },
     "SoundService": {

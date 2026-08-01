@@ -2,7 +2,6 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
-local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local EnemyConfig = require(Shared:WaitForChild("EnemyConfig"))
@@ -43,7 +42,6 @@ local function getOrCreateFolder(parent: Instance, name: string): Folder
 end
 
 local poolRoot = getOrCreateFolder(ServerStorage, "EnemyPool")
-local activeEnemiesFolder = getOrCreateFolder(Workspace, "ActiveEnemies")
 
 local pools: { [string]: Pool } = {}
 local enemyTypes: { [Model]: string } = {}
@@ -105,6 +103,9 @@ end
 local function storeInactive(model: Model, pool: Pool)
 	local humanoid = getHumanoid(model)
 	model:SetAttribute("PoolActive", false)
+	model:SetAttribute("OwnerUserId", nil)
+	model:SetAttribute("ArenaId", nil)
+	model:SetAttribute("RunGeneration", nil)
 
 	humanoid:Move(Vector3.zero)
 	stopAnimations(humanoid)
@@ -172,7 +173,7 @@ function EnemyPool.Register(enemyType: string, template: Model, prewarmCount: nu
 	register(enemyType, template, prewarmCount or 0)
 end
 
-function EnemyPool.Acquire(enemyType: string): Model
+function EnemyPool.Acquire(enemyType: string, activeEnemiesFolder: Folder): Model
 	local stats = EnemyConfig[enemyType]
 	assert(stats, `Unknown EnemyId "{enemyType}"`)
 

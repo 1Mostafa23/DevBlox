@@ -1,7 +1,8 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 
 local WaveService = require(script.Parent.WaveService)
+local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -9,26 +10,21 @@ require(Shared:WaitForChild("Remotes"))
 
 local RequestWaveStart = Shared:WaitForChild("Remotes"):WaitForChild("RequestWaveStart") :: RemoteEvent
 local RequestWaveStop = Shared:WaitForChild("Remotes"):WaitForChild("RequestWaveStop") :: RemoteEvent
-local BossTrigger = Workspace:WaitForChild("Map"):WaitForChild("BossZone"):WaitForChild("BossTrigger") :: BasePart
+local BossTrigger = ArenaService.GetCurrent().BossTrigger
 
 local COUNTDOWN_SECONDS = 5
 local MONITOR_INTERVAL = 0.2
 
-local startRequested = false
-local activeStarter: Player? = nil
-local waveSessionGeneration = 0
-local stopInProgress = false
-local defeatFeedbackGeneration: number? = nil
-
 local function sendDefeatFeedback(player: Player, sessionGeneration: number)
-	if activeStarter ~= player
-		or waveSessionGeneration ~= sessionGeneration
-		or defeatFeedbackGeneration == sessionGeneration
+	local context = WaveService.GetRunContext(player)
+	if not context
+		or context.RunGeneration ~= sessionGeneration
+		or context.FeedbackGeneration == sessionGeneration
 	then
 		return
 	end
 
-	defeatFeedbackGeneration = sessionGeneration
+	context.FeedbackGeneration = sessionGeneration
 	RequestWaveStop:FireClient(player, "defeated")
 end
 
@@ -53,52 +49,49 @@ local function getLivingRoot(player: Player): BasePart?
 	return rootPart
 end
 
-local function stopActiveWave(defeatedPlayer: Player?): boolean
-	if stopInProgress then
+local function stopActiveWave(player: Player, reason: string): boolean
+	local context = WaveService.GetRunContext(player)
+	if not context or context.StopGuard then
 		return false
 	end
 
-	local runOwner = activeStarter
-	local stoppedGeneration = waveSessionGeneration
-	if defeatedPlayer == runOwner then
-		sendDefeatFeedback(defeatedPlayer, stoppedGeneration)
+	local stoppedGeneration = context.RunGeneration
+	if reason == "defeated" then
+		sendDefeatFeedback(player, stoppedGeneration)
 	end
-	stopInProgress = true
-	local waveStopped = WaveService.Stop()
-	if not waveStopped and not startRequested then
-		stopInProgress = false
+
+	context.StopGuard = true
+	local waveStopped = WaveService.Stop(player, reason)
+	if not waveStopped and not context.StartRequested then
+		context.StopGuard = false
 		return false
 	end
 
-	if not waveStopped and runOwner then
-		PlayerHealthService.Reset(runOwner)
+	if not waveStopped then
+		PlayerHealthService.Reset(player)
 	end
-	startRequested = false
-	activeStarter = nil
-	waveSessionGeneration += 1
-	RequestWaveStop:FireAllClients("stopped")
-	stopInProgress = false
+	context.StartRequested = false
+	RequestWaveStop:FireClient(player, "stopped")
+	context.StopGuard = false
 	return true
 end
 
 PlayerHealthService.HealthChanged:Connect(function(player: Player, health: number)
-	local isZero = health <= 0
-	local ownerMatches = activeStarter == player
-	if not isZero or not startRequested or not ownerMatches then
+	local context = WaveService.GetRunContext(player)
+	if health > 0 or not context or not context.StartRequested then
 		return
 	end
 
-	local sessionGeneration = waveSessionGeneration
+	local sessionGeneration = context.RunGeneration
 	sendDefeatFeedback(player, sessionGeneration)
 	task.defer(function()
-		local sessionCurrent = waveSessionGeneration == sessionGeneration
-		local stateAllowsStop = WaveService.GetState() ~= "Finished"
-		if startRequested
-			and activeStarter == player
-			and sessionCurrent
-			and stateAllowsStop
+		local currentContext = WaveService.GetRunContext(player)
+		if currentContext
+			and currentContext.StartRequested
+			and currentContext.RunGeneration == sessionGeneration
+			and WaveService.GetState(player) ~= "Finished"
 		then
-			stopActiveWave(player)
+			stopActiveWave(player, "defeated")
 		end
 	end)
 end)
@@ -107,11 +100,16 @@ local function monitorStarter(player: Player, sessionGeneration: number)
 	local countdownDeadline: number? = nil
 	local lastRemaining: number? = nil
 
-	while startRequested
-		and activeStarter == player
-		and waveSessionGeneration == sessionGeneration
-		and WaveService.GetState() ~= "Finished"
-	do
+	while true do
+		local context = WaveService.GetRunContext(player)
+		if not context
+			or not context.StartRequested
+			or context.RunGeneration ~= sessionGeneration
+			or WaveService.GetState(player) == "Finished"
+		then
+			return
+		end
+
 		local rootPart = getLivingRoot(player)
 		local isInside = rootPart ~= nil and isInsideBossTrigger(rootPart)
 
@@ -119,7 +117,7 @@ local function monitorStarter(player: Player, sessionGeneration: number)
 			if countdownDeadline then
 				countdownDeadline = nil
 				lastRemaining = nil
-				RequestWaveStop:FireAllClients("countdown_cancelled")
+				RequestWaveStop:FireClient(player, "countdown_cancelled")
 			end
 		else
 			if not countdownDeadline then
@@ -129,11 +127,11 @@ local function monitorStarter(player: Player, sessionGeneration: number)
 			local remaining = math.max(0, math.ceil(countdownDeadline - time()))
 			if remaining ~= lastRemaining then
 				lastRemaining = remaining
-				RequestWaveStop:FireAllClients("countdown", remaining)
+				RequestWaveStop:FireClient(player, "countdown", remaining)
 			end
 
 			if remaining <= 0 then
-				stopActiveWave()
+				stopActiveWave(player, "left_arena")
 				return
 			end
 		end
@@ -143,7 +141,8 @@ local function monitorStarter(player: Player, sessionGeneration: number)
 end
 
 RequestWaveStart.OnServerEvent:Connect(function(player)
-	if startRequested then
+	local context = WaveService.GetOrCreateRunContext(player)
+	if context.StartRequested or context.Started then
 		return
 	end
 
@@ -157,23 +156,22 @@ RequestWaveStart.OnServerEvent:Connect(function(player)
 		return
 	end
 
-	startRequested = true
-	activeStarter = player
-	waveSessionGeneration += 1
-	defeatFeedbackGeneration = nil
-	local sessionGeneration = waveSessionGeneration
-	RequestWaveStart:FireAllClients("started")
-	task.spawn(function()
-		if startRequested
-			and activeStarter == player
-			and waveSessionGeneration == sessionGeneration
-		then
-			WaveService.Start(player)
-		end
-	end)
+	context.StartRequested = true
+	context.FeedbackGeneration = nil
+	if not WaveService.Start(player) then
+		context.StartRequested = false
+		return
+	end
+
+	local sessionGeneration = context.RunGeneration
+	RequestWaveStart:FireClient(player, "started")
 	task.spawn(monitorStarter, player, sessionGeneration)
 end)
 
 RequestWaveStop.OnServerEvent:Connect(function(player)
-	stopActiveWave()
+	stopActiveWave(player, "manual")
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	WaveService.RemoveRunContext(player)
 end)

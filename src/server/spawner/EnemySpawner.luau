@@ -7,40 +7,19 @@ local CharacterCollisionService =
 	require(script.Parent.Parent.collisions.CharacterCollisionService)
 local EnemyCollisionService = require(script.Parent.Parent.collisions.EnemyCollisionService)
 local EnemyFollowService = require(script.Parent.Parent.enemies.EnemyFollowService)
+local RunContextModule = require(script.Parent.RunContext)
+
+type RunContext = RunContextModule.RunContext
 
 CharacterCollisionService.Setup()
-
-local spawnPointsFolder = Workspace:WaitForChild("Map"):WaitForChild("SpawnPoints")
-local spawnPoints: { BasePart } = {}
-
-for _, spawnPointName in { "Spawn1", "Spawn2", "Spawn3" } do
-	local spawnPoint = spawnPointsFolder:WaitForChild(spawnPointName)
-	assert(
-		spawnPoint:IsA("BasePart"),
-		`Workspace.Map.SpawnPoints.{spawnPointName} must be a BasePart`
-	)
-	table.insert(spawnPoints, spawnPoint)
-end
-
-local activeEnemiesInstance = Workspace:FindFirstChild("ActiveEnemies")
-if not activeEnemiesInstance then
-	local folder = Instance.new("Folder")
-	folder.Name = "ActiveEnemies"
-	folder.Parent = Workspace
-	activeEnemiesInstance = folder
-end
-
-assert(activeEnemiesInstance:IsA("Folder"), "Workspace.ActiveEnemies must be a Folder")
-local activeEnemiesFolder = activeEnemiesInstance
-
-local overlapParams = OverlapParams.new()
-overlapParams.FilterType = Enum.RaycastFilterType.Include
-overlapParams.FilterDescendantsInstances = { activeEnemiesFolder }
 
 local rng = Random.new()
 local EnemySpawner = {}
 
-local function isSpawnPointFree(spawnPoint: BasePart): boolean
+local function isSpawnPointFree(spawnPoint: BasePart, activeEnemiesFolder: Folder): boolean
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Include
+	overlapParams.FilterDescendantsInstances = { activeEnemiesFolder }
 	local nearbyEnemyParts = Workspace:GetPartBoundsInBox(
 		spawnPoint.CFrame,
 		Vector3.new(6, 6, 6),
@@ -50,11 +29,12 @@ local function isSpawnPointFree(spawnPoint: BasePart): boolean
 	return #nearbyEnemyParts == 0
 end
 
-local function chooseSpawnPoint(): BasePart
+local function chooseSpawnPoint(context: RunContext): BasePart
 	local freeSpawnPoints: { BasePart } = {}
+	local spawnPoints = context.ArenaContext.SpawnPoints
 
 	for _, spawnPoint in spawnPoints do
-		if isSpawnPointFree(spawnPoint) then
+		if isSpawnPointFree(spawnPoint, context.ArenaContext.ActiveEnemies) then
 			table.insert(freeSpawnPoints, spawnPoint)
 		end
 	end
@@ -63,13 +43,17 @@ local function chooseSpawnPoint(): BasePart
 	return candidates[rng:NextInteger(1, #candidates)]
 end
 
-function EnemySpawner.Spawn(): Model
-	local spawnPoint = chooseSpawnPoint()
-	local enemy = EnemyPool.Acquire("enemy")
+function EnemySpawner.Spawn(context: RunContext): Model
+	local arena = context.ArenaContext
+	local spawnPoint = chooseSpawnPoint(context)
+	local enemy = EnemyPool.Acquire("enemy", arena.ActiveEnemies)
+	enemy:SetAttribute("OwnerUserId", context.OwnerUserId)
+	enemy:SetAttribute("ArenaId", arena.ArenaId)
+	enemy:SetAttribute("RunGeneration", context.RunGeneration)
 
 	EnemyCollisionService.RegisterEnemy(enemy)
 	enemy:PivotTo(spawnPoint.CFrame)
-	EnemyFollowService.Register(enemy)
+	EnemyFollowService.Register(enemy, context)
 
 	return enemy
 end

@@ -3,10 +3,14 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
 
 local EnemyConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EnemyConfig"))
+local ArenaContextModule = require(script.Parent.Parent.arena.ArenaContext)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
+local RunContextModule = require(script.Parent.Parent.spawner.RunContext)
+
+type RunContext = RunContextModule.RunContext
+type ArenaContext = ArenaContextModule.ArenaContext
 
 local UPDATE_INTERVAL = 0.2
 local ACTIVE_WALK_SPEED = 10
@@ -22,6 +26,12 @@ local MAX_ENGAGED_MOVEMENT_SPEED = 0.5
 type MovementState = "Chasing" | "Engaged"
 
 type Registration = {
+	ownerPlayer: Player,
+	ownerUserId: number,
+	arenaId: string,
+	runGeneration: number,
+	arenaContext: ArenaContext,
+	waveActive: boolean,
 	humanoid: Humanoid,
 	rootPart: BasePart,
 	state: MovementState,
@@ -36,12 +46,8 @@ type Registration = {
 	runTrack: AnimationTrack?,
 }
 
-local activeEnemiesFolder = Workspace:WaitForChild("ActiveEnemies")
-local deployedUnitsFolder = Workspace:WaitForChild("DeployedUnits")
 local registrations: { [Model]: Registration } = {}
 local rng = Random.new()
-local waveActive = false
-local runOwner: Player? = nil
 
 local EnemyFollowService = {}
 
@@ -86,11 +92,20 @@ local function updateEngagedFacing(registration: Registration, target: BasePart)
 	end
 end
 
-local function getLivingUnitTargets(): { BasePart }
+local function matchesRun(model: Model, registration: Registration): boolean
+	return model:GetAttribute("OwnerUserId") == registration.ownerUserId
+		and model:GetAttribute("ArenaId") == registration.arenaId
+		and model:GetAttribute("RunGeneration") == registration.runGeneration
+end
+
+local function getLivingUnitTargets(registration: Registration): { BasePart }
 	local targets: { BasePart } = {}
 
-	for _, unit in deployedUnitsFolder:GetChildren() do
+	for _, unit in registration.arenaContext.DeployedUnits:GetChildren() do
 		if not unit:IsA("Model") then
+			continue
+		end
+		if not matchesRun(unit, registration) then
 			continue
 		end
 
@@ -104,9 +119,9 @@ local function getLivingUnitTargets(): { BasePart }
 	return targets
 end
 
-local function getLivingPlayerTargets(): { BasePart }
+local function getLivingPlayerTargets(registration: Registration): { BasePart }
 	local targets: { BasePart } = {}
-	local owner = runOwner
+	local owner = registration.ownerPlayer
 	if not owner or owner.Parent ~= Players or not PlayerHealthService.IsAlive(owner) then
 		return targets
 	end
@@ -120,13 +135,13 @@ local function getLivingPlayerTargets(): { BasePart }
 	return targets
 end
 
-local function getLivingTargets(): { BasePart }
-	local unitTargets = getLivingUnitTargets()
+local function getLivingTargets(registration: Registration): { BasePart }
+	local unitTargets = getLivingUnitTargets(registration)
 	if #unitTargets > 0 then
 		return unitTargets
 	end
 
-	return getLivingPlayerTargets()
+	return getLivingPlayerTargets(registration)
 end
 
 local function findNearestTarget(position: Vector3, targets: { BasePart }): BasePart?
@@ -164,13 +179,16 @@ type LivingTarget = {
 	player: Player?,
 }
 
-local function getLivingTarget(target: BasePart): LivingTarget?
+local function getLivingTarget(registration: Registration, target: BasePart): LivingTarget?
 	local model = target.Parent
 	if not model or not model:IsA("Model") then
 		return nil
 	end
 
-	if model:IsDescendantOf(deployedUnitsFolder) then
+	if model:IsDescendantOf(registration.arenaContext.DeployedUnits) then
+		if not matchesRun(model, registration) then
+			return nil
+		end
 		local humanoid = model:FindFirstChildOfClass("Humanoid")
 		if humanoid and humanoid.Health > 0 then
 			return { humanoid = humanoid, player = nil }
@@ -179,7 +197,7 @@ local function getLivingTarget(target: BasePart): LivingTarget?
 	end
 
 	local player = Players:GetPlayerFromCharacter(model)
-	if player and PlayerHealthService.IsAlive(player) then
+	if player == registration.ownerPlayer and PlayerHealthService.IsAlive(player) then
 		return { humanoid = nil, player = player }
 	end
 	return nil
@@ -187,11 +205,12 @@ end
 
 local function tryAttack(enemy: Model, registration: Registration, target: BasePart)
 	local now = time()
-	local livingTarget = getLivingTarget(target)
-	if not waveActive
+	local livingTarget = getLivingTarget(registration, target)
+	if not registration.waveActive
 		or now < registration.nextAttackTime
 		or enemy:GetAttribute("PoolActive") ~= true
-		or not enemy:IsDescendantOf(activeEnemiesFolder)
+		or not enemy:IsDescendantOf(registration.arenaContext.ActiveEnemies)
+		or not matchesRun(enemy, registration)
 		or registration.humanoid.Health <= 0
 		or registration.rootPart.Parent == nil
 		or not livingTarget
@@ -208,7 +227,7 @@ local function tryAttack(enemy: Model, registration: Registration, target: BaseP
 	end
 end
 
-function EnemyFollowService.Register(enemy: Model)
+function EnemyFollowService.Register(enemy: Model, context: RunContext)
 	if registrations[enemy] then
 		return
 	end
@@ -217,7 +236,15 @@ function EnemyFollowService.Register(enemy: Model)
 	local rootPart = enemy:FindFirstChild("HumanoidRootPart")
 	local enemyType = enemy:GetAttribute("EnemyType")
 	local stats = if typeof(enemyType) == "string" then EnemyConfig[enemyType] else nil
-	if not humanoid or not rootPart or not rootPart:IsA("BasePart") or not stats then
+	if not humanoid
+		or not rootPart
+		or not rootPart:IsA("BasePart")
+		or not stats
+		or enemy:GetAttribute("OwnerUserId") ~= context.OwnerUserId
+		or enemy:GetAttribute("ArenaId") ~= context.ArenaContext.ArenaId
+		or enemy:GetAttribute("RunGeneration") ~= context.RunGeneration
+		or not enemy:IsDescendantOf(context.ArenaContext.ActiveEnemies)
+	then
 		return
 	end
 
@@ -251,6 +278,12 @@ function EnemyFollowService.Register(enemy: Model)
 	humanoid.WalkSpeed = ACTIVE_WALK_SPEED
 	humanoid.AutoRotate = true
 	registrations[enemy] = {
+		ownerPlayer = context.OwnerPlayer,
+		ownerUserId = context.OwnerUserId,
+		arenaId = context.ArenaContext.ArenaId,
+		runGeneration = context.RunGeneration,
+		arenaContext = context.ArenaContext,
+		waveActive = true,
 		humanoid = humanoid,
 		rootPart = rootPart,
 		state = "Chasing",
@@ -289,21 +322,27 @@ function EnemyFollowService.Unregister(enemy: Model)
 	registrations[enemy] = nil
 end
 
-function EnemyFollowService.BeginWave()
-	waveActive = true
+function EnemyFollowService.BeginWave(context: RunContext)
 	for _, registration in registrations do
-		registration.nextAttackTime = 0
+		if registration.ownerUserId == context.OwnerUserId
+			and registration.arenaId == context.ArenaContext.ArenaId
+			and registration.runGeneration == context.RunGeneration
+		then
+			registration.waveActive = true
+			registration.nextAttackTime = 0
+		end
 	end
 end
 
-function EnemyFollowService.SetRunOwner(owner: Player?)
-	runOwner = owner
-end
-
-function EnemyFollowService.EndWave()
-	waveActive = false
+function EnemyFollowService.EndWave(context: RunContext)
 	for _, registration in registrations do
-		registration.nextAttackTime = 0
+		if registration.ownerUserId == context.OwnerUserId
+			and registration.arenaId == context.ArenaContext.ArenaId
+			and registration.runGeneration == context.RunGeneration
+		then
+			registration.waveActive = false
+			registration.nextAttackTime = 0
+		end
 	end
 end
 
@@ -313,7 +352,8 @@ RunService.Heartbeat:Connect(function()
 		if registration.state ~= "Engaged"
 			or not target
 			or enemy:GetAttribute("PoolActive") ~= true
-			or target.Parent == nil
+			or not matchesRun(enemy, registration)
+			or not getLivingTarget(registration, target)
 		then
 			registration.facingAlignment.Enabled = false
 			continue
@@ -333,13 +373,12 @@ end)
 
 task.spawn(function()
 	while true do
-		local targets = getLivingTargets()
-
 		for enemy, registration in registrations do
 			local humanoid = registration.humanoid
 			local rootPart = registration.rootPart
 			if enemy:GetAttribute("PoolActive") ~= true
-				or not enemy:IsDescendantOf(activeEnemiesFolder)
+				or not enemy:IsDescendantOf(registration.arenaContext.ActiveEnemies)
+				or not matchesRun(enemy, registration)
 				or humanoid.Health <= 0
 				or rootPart.Parent == nil
 			then
@@ -348,12 +387,12 @@ task.spawn(function()
 			end
 
 			local previousTarget = registration.target
-			if previousTarget and not getLivingTarget(previousTarget) then
+			if previousTarget and not getLivingTarget(registration, previousTarget) then
 				setTarget(registration, nil)
 				registration.nextAttackTime = 0
 			end
 
-			local target = findNearestTarget(rootPart.Position, targets)
+			local target = findNearestTarget(rootPart.Position, getLivingTargets(registration))
 			setTarget(registration, target)
 			if not target then
 				setMovementState(registration, "Chasing")
@@ -364,7 +403,7 @@ task.spawn(function()
 
 			local distance = (target.Position - rootPart.Position).Magnitude
 			tryAttack(enemy, registration, target)
-			if not getLivingTarget(target) then
+			if not getLivingTarget(registration, target) then
 				setTarget(registration, nil)
 				registration.nextAttackTime = 0
 				setMovementState(registration, "Chasing")

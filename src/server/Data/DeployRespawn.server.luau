@@ -5,7 +5,11 @@ local Players = game:GetService("Players")
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local InventoryService = require(script.Parent.InventoryService)
+local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
+local WaveService = require(script.Parent.Parent.spawner.WaveService)
+
+local arenaContext = ArenaService.GetCurrent()
 
 local function respawnDeployed(player: Player)
 	local profile = PlayerDataService.WaitForProfile(player, 15)
@@ -13,26 +17,44 @@ local function respawnDeployed(player: Player)
 
 	for instanceId, unit in profile.Data.Units do
 		if unit.Deployed and unit.Position then
+			local runContext = WaveService.GetRunContext(player)
+			local playerArenaContext = if runContext then runContext.ArenaContext else arenaContext
+			local runGeneration = if runContext then runContext.RunGeneration else 0
 			local savedZonePosition = unit.ZonePosition
 			local savedPosition: Vector3
 			local savedZoneWasInside = true
 			if savedZonePosition then
-				savedPosition, savedZoneWasInside = UnitSpawner.ZoneToWorldPosition(Vector3.new(
-					savedZonePosition.X,
-					savedZonePosition.Y,
-					savedZonePosition.Z
-				))
+				savedPosition, savedZoneWasInside = UnitSpawner.ZoneToWorldPosition(
+					playerArenaContext,
+					Vector3.new(
+						savedZonePosition.X,
+						savedZonePosition.Y,
+						savedZonePosition.Z
+					)
+				)
 			else
 				savedPosition = Vector3.new(unit.Position.X, unit.Position.Y, unit.Position.Z)
 			end
-			local position, zonePosition, wasInside = UnitSpawner.ResolveZonePosition(savedPosition, true)
+			local position, zonePosition, wasInside = UnitSpawner.ResolveZonePosition(
+				playerArenaContext,
+				savedPosition,
+				true
+			)
 			if position and zonePosition then
 				if not savedZoneWasInside or not wasInside then
 					warn(
 						`[DeployRespawn] stale position outside Workspace.DeployZone for {player.Name}/{instanceId}; clamped inside zone`
 					)
 				end
-				local model = UnitSpawner.Spawn(player, instanceId, unit.UnitId, position, unit.RotationY)
+				local model = UnitSpawner.Spawn(
+					playerArenaContext,
+					runGeneration,
+					player,
+					instanceId,
+					unit.UnitId,
+					position,
+					unit.RotationY
+				)
 				if model then
 					InventoryService.DeployUnit(player, instanceId, position, zonePosition)
 				end
