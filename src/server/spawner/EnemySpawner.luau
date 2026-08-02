@@ -43,10 +43,10 @@ local function chooseSpawnPoint(context: RunContext): BasePart
 	return candidates[rng:NextInteger(1, #candidates)]
 end
 
-function EnemySpawner.Spawn(context: RunContext): Model
+function EnemySpawner.Spawn(context: RunContext, enemyId: string): Model
 	local arena = context.ArenaContext
 	local spawnPoint = chooseSpawnPoint(context)
-	local enemy = EnemyPool.Acquire("enemy", arena.ActiveEnemies)
+	local enemy = EnemyPool.Acquire(enemyId, arena.ActiveEnemies)
 	enemy:SetAttribute("OwnerUserId", context.OwnerUserId)
 	enemy:SetAttribute("ArenaId", arena.ArenaId)
 	enemy:SetAttribute("RunGeneration", context.RunGeneration)

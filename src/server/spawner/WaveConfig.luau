@@ -1,10 +1,17 @@
 --!strict
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local EnemyConfig = require(Shared:WaitForChild("EnemyConfig"))
+
 export type Wave = {
-	enemyType: "enemy",
+	enemyType: EnemyConfig.EnemyId, -- default enemy for this wave's spawns
 	enemyCount: number,
 	spawnInterval: number,
 	intermission: number,
+	-- Overrides enemyType for specific spawn indices (1-based, within this wave)
+	-- so a wave can mix in a few of a different type without changing enemyCount.
+	enemyOverrides: { [number]: EnemyConfig.EnemyId }?,
 }
 
 local WaveConfig: { Wave } = {
@@ -19,6 +26,7 @@ local WaveConfig: { Wave } = {
 		enemyCount = 4,
 		spawnInterval = 0.42,
 		intermission = 1.5,
+		enemyOverrides = { [1] = "enemy1" }, -- 1 tank in wave 2
 	},
 	{
 		enemyType = "enemy",

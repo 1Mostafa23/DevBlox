@@ -84,7 +84,8 @@ local function runWaves(context: RunContext, generation: number)
 				return
 			end
 
-			local enemy = EnemySpawner.Spawn(context)
+			local enemyId = (wave.enemyOverrides and wave.enemyOverrides[enemyNumber]) or wave.enemyType
+			local enemy = EnemySpawner.Spawn(context, enemyId)
 			local humanoid = enemy:FindFirstChildOfClass("Humanoid")
 			assert(humanoid, `Spawned enemy for wave {waveNumber} must contain a Humanoid`)
 

@@ -71,6 +71,8 @@ local function applyStats(model: Model, enemyId: string)
 	local stats = EnemyConfig[enemyId]
 	assert(stats, `Unknown EnemyId "{enemyId}"`)
 
+	model:ScaleTo(stats.ModelScale)
+
 	local humanoid = getHumanoid(model)
 	humanoid.MaxHealth = stats.MaxHealth
 	humanoid.Health = stats.MaxHealth
@@ -352,8 +354,14 @@ function EnemyPool.Release(model: Model)
 	pool.availableSet[model] = true
 end
 
-local enemyTemplate = ReplicatedStorage:WaitForChild("Enemies"):WaitForChild("enemy")
+local enemiesFolder = ReplicatedStorage:WaitForChild("Enemies")
+
+local enemyTemplate = enemiesFolder:WaitForChild("enemy")
 assert(enemyTemplate:IsA("Model"), "ReplicatedStorage.Enemies.enemy must be a Model")
 EnemyPool.Register("enemy", enemyTemplate, PREWARM_COUNT)
+
+local enemy1Template = enemiesFolder:WaitForChild("enemy1")
+assert(enemy1Template:IsA("Model"), "ReplicatedStorage.Enemies.enemy1 must be a Model")
+EnemyPool.Register("enemy1", enemy1Template, PREWARM_COUNT)
 
 return EnemyPool

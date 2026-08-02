@@ -1,36 +1,21 @@
 --!strict
 
-export type Archetype = "Tank" | "MeleeDPS" | "RangedDPS" | "Healer"
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local CombatArchetypes = require(Shared:WaitForChild("CombatArchetypes"))
+
+export type Archetype = CombatArchetypes.Archetype
+export type Role = CombatArchetypes.Role
+export type CombatStats = CombatArchetypes.CombatStats
+export type ArchetypeConfig = CombatArchetypes.ArchetypeConfig
+export type StatMultipliers = CombatArchetypes.StatMultipliers
+export type ArchetypeRegistry = CombatArchetypes.ArchetypeRegistry
+
 export type Rarity = "Common" | "Uncommon" | "Rare" | "Epic" | "Legendary" | "Mythic"
--- "Damage" archetypes fight enemies; "Healer" restores allies' health instead.
--- For a Healer archetype, Damage/AttackRange/AttackCooldown below are reused to
--- mean heal-per-application/heal-range/heal-cooldown (see UnitFollowService.luau).
-export type Role = "Damage" | "Healer"
-
-export type CombatStats = {
-	MaxHealth: number,
-	WalkSpeed: number,
-	Damage: number,
-	AttackCooldown: number,
-	AttackRange: number,
-}
-
-export type ArchetypeConfig = CombatStats & {
-	ModelScale: number,
-	Role: Role,
-}
-
-export type StatMultipliers = {
-	MaxHealth: number,
-	WalkSpeed: number,
-	Damage: number,
-	AttackCooldown: number,
-	AttackRange: number,
-}
-
-export type ArchetypeRegistry = { [Archetype]: ArchetypeConfig }
 export type RarityMultiplierRegistry = { [Rarity]: StatMultipliers }
 
+-- Ally-only base stats per archetype. Enemies share the same shape/vocabulary
+-- (see EnemyConfig.luau) but have their own, independently-tuned numbers.
 local archetypes: ArchetypeRegistry = {
 	Tank = {
 		MaxHealth = 600,
@@ -60,8 +45,9 @@ local archetypes: ArchetypeRegistry = {
 		Role = "Damage",
 	},
 	-- Pure support: no attack, heals the lowest-HP deployed unit (itself included).
-	-- Survivability/range/cooldown carried over from RangedDPS; Damage here means
-	-- heal-per-application, scaled by rarity the same way a normal Damage stat is.
+	-- Survivability/cooldown carried over from RangedDPS with a longer range so it
+	-- can heal from a safe distance; Damage here means heal-per-application, scaled
+	-- by rarity the same way a normal Damage stat is.
 	Healer = {
 		MaxHealth = 250,
 		WalkSpeed = 9,
@@ -118,17 +104,10 @@ local rarityMultipliers: RarityMultiplierRegistry = {
 	},
 }
 
-local IDENTITY_MULTIPLIERS: StatMultipliers = {
-	MaxHealth = 1,
-	WalkSpeed = 1,
-	Damage = 1,
-	AttackCooldown = 1,
-	AttackRange = 1,
-}
-
 local UnitConfig = {
 	Archetypes = archetypes,
 	RarityMultipliers = rarityMultipliers,
+	ApplyMultipliers = CombatArchetypes.ApplyMultipliers,
 }
 
 function UnitConfig.GetArchetype(archetype: string): ArchetypeConfig?
@@ -137,39 +116,6 @@ end
 
 function UnitConfig.GetRarityMultiplier(rarity: string): StatMultipliers?
 	return (rarityMultipliers :: { [string]: StatMultipliers })[rarity]
-end
-
-function UnitConfig.ApplyMultipliers(
-	baseStats: CombatStats,
-	rarityMultiplier: StatMultipliers,
-	mutationMultiplier: StatMultipliers?,
-	levelMultiplier: StatMultipliers?
-): CombatStats
-	local mutation = mutationMultiplier or IDENTITY_MULTIPLIERS
-	local level = levelMultiplier or IDENTITY_MULTIPLIERS
-
-	return {
-		MaxHealth = baseStats.MaxHealth
-			* rarityMultiplier.MaxHealth
-			* mutation.MaxHealth
-			* level.MaxHealth,
-		WalkSpeed = baseStats.WalkSpeed
-			* rarityMultiplier.WalkSpeed
-			* mutation.WalkSpeed
-			* level.WalkSpeed,
-		Damage = baseStats.Damage
-			* rarityMultiplier.Damage
-			* mutation.Damage
-			* level.Damage,
-		AttackCooldown = baseStats.AttackCooldown
-			* rarityMultiplier.AttackCooldown
-			* mutation.AttackCooldown
-			* level.AttackCooldown,
-		AttackRange = baseStats.AttackRange
-			* rarityMultiplier.AttackRange
-			* mutation.AttackRange
-			* level.AttackRange,
-	}
 end
 
 return UnitConfig
