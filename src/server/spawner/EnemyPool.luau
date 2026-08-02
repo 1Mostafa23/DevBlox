@@ -2,11 +2,19 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local EnemyConfig = require(Shared:WaitForChild("EnemyConfig"))
 
 local PREWARM_COUNT = 15
+
+-- Must match client/UnitBillboardScale.client.luau — reusing the same tag gives
+-- enemy health bars the same constant-on-screen-size behavior as unit bars for free.
+local UNIT_BILLBOARD_TAG = "UnitBillboard"
+-- Always red, unlike the deployed-unit bar's green->yellow->red, so enemies read
+-- as hostile at a glance regardless of their remaining health.
+local ENEMY_BAR_COLOR = Color3.fromRGB(220, 60, 60)
 
 type PartDefaults = {
 	transparency: number,
@@ -63,6 +71,86 @@ local function applyStats(model: Model, enemyId: string)
 	humanoid.MaxHealth = stats.MaxHealth
 	humanoid.Health = stats.MaxHealth
 	humanoid.WalkSpeed = stats.WalkSpeed
+end
+
+local function updateHealthBar(humanoid: Humanoid, fill: Frame, text: TextLabel)
+	local maxHealth = math.max(humanoid.MaxHealth, 1)
+	local fraction = math.clamp(humanoid.Health / maxHealth, 0, 1)
+	fill.Size = UDim2.fromScale(fraction, 1)
+	text.Text = `{math.floor(humanoid.Health + 0.5)} / {math.floor(humanoid.MaxHealth + 0.5)}`
+end
+
+-- Always-red health bar, no name label (enemies have no DisplayName/Rarity today).
+-- Built once per pooled model instance; HealthChanged keeps it in sync across
+-- every future Acquire()/reuse of this same model.
+local function makeHealthBar(model: Model, humanoid: Humanoid)
+	local head = model.PrimaryPart
+	if not head then return end
+
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "EnemyHealthBar"
+	billboard.Size = UDim2.fromOffset(90, 20)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = math.huge
+	billboard.Adornee = head
+	billboard.Parent = head
+	CollectionService:AddTag(billboard, UNIT_BILLBOARD_TAG)
+
+	-- Scale-only Size/Position throughout (no Offset) so the bar stays correctly
+	-- laid out no matter what size the distance script sets on the billboard.
+	local barBackground = Instance.new("Frame")
+	barBackground.Name = "HealthBarBackground"
+	barBackground.Size = UDim2.new(0.94, 0, 1, 0)
+	barBackground.Position = UDim2.new(0.03, 0, 0, 0)
+	barBackground.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+	barBackground.BackgroundTransparency = 0.15
+	barBackground.BorderSizePixel = 0
+	barBackground.ClipsDescendants = true
+	barBackground.Parent = billboard
+
+	local barBackgroundCorner = Instance.new("UICorner")
+	barBackgroundCorner.CornerRadius = UDim.new(0, 5)
+	barBackgroundCorner.Parent = barBackground
+
+	local barBackgroundStroke = Instance.new("UIStroke")
+	barBackgroundStroke.Color = Color3.new(0, 0, 0)
+	barBackgroundStroke.Thickness = 1
+	barBackgroundStroke.Transparency = 0
+	barBackgroundStroke.Parent = barBackground
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "HealthBarFill"
+	barFill.Size = UDim2.fromScale(1, 1)
+	barFill.BackgroundColor3 = ENEMY_BAR_COLOR
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBackground
+
+	local barFillCorner = Instance.new("UICorner")
+	barFillCorner.CornerRadius = UDim.new(0, 5)
+	barFillCorner.Parent = barFill
+
+	local hpText = Instance.new("TextLabel")
+	hpText.Name = "HealthText"
+	hpText.Size = UDim2.fromScale(1, 1)
+	hpText.BackgroundTransparency = 1
+	hpText.Font = Enum.Font.GothamBold
+	hpText.TextScaled = true
+	hpText.TextColor3 = Color3.new(1, 1, 1)
+	hpText.TextStrokeTransparency = 0.5
+	hpText.ZIndex = 2
+	hpText.Parent = barBackground
+
+	local hpTextConstraint = Instance.new("UITextSizeConstraint")
+	hpTextConstraint.MaxTextSize = 11
+	hpTextConstraint.Parent = hpText
+
+	updateHealthBar(humanoid, barFill, hpText)
+	humanoid.HealthChanged:Connect(function()
+		updateHealthBar(humanoid, barFill, hpText)
+	end)
 end
 
 local function captureDefaults(model: Model): ModelDefaults
@@ -133,6 +221,7 @@ local function createModel(enemyType: string, pool: Pool): Model
 	model:SetAttribute("EnemyType", enemyType)
 	enemyTypes[model] = enemyType
 	defaultsByModel[model] = captureDefaults(model)
+	makeHealthBar(model, getHumanoid(model))
 	return model
 end
 

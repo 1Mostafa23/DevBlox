@@ -7,6 +7,7 @@ local EnemyFollowService = require(script.Parent.Parent.enemies.EnemyFollowServi
 local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
 local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
+local PlayerHealthBar = require(script.Parent.Parent.players.PlayerHealthBar)
 local RunContextModule = require(script.Parent.RunContext)
 local WaveConfig = require(script.Parent.WaveConfig)
 
@@ -165,6 +166,7 @@ function WaveService.Start(owner: Player): boolean
 	context.Started = true
 	context.StartRequested = true
 	setState(context, "Idle")
+	PlayerHealthBar.Ensure(owner) -- guaranteed-loaded fallback in case CharacterAdded fired too early
 	context.CurrentWave = 0
 	context.RunGeneration += 1
 	context.FeedbackGeneration = nil

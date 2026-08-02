@@ -3,6 +3,7 @@
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UnitDatabase = require(Shared.UnitDatabase)
@@ -19,11 +20,21 @@ local UnitModels = ServerStorage:WaitForChild("UnitModels")
 
 local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
 
+-- Tag consumed by client/UnitBillboardScale.client.luau so it keeps shrinking with
+-- distance in proportion to the unit itself, instead of holding Roblox's default
+-- "stay legible" minimum size (which is what made it look oversized far away).
+local UNIT_BILLBOARD_TAG = "UnitBillboard"
+-- Tag consumed by client/DamageNumbers.client.luau to know which Humanoids should
+-- show floating damage numbers. Deployed units only for now — enemies can opt in
+-- later just by tagging their Humanoid the same way (see EnemyPool.luau).
+local DAMAGE_NUMBER_TAG = "DamageNumberSource"
+
 local UnitSpawner = {}
 
 -- Track deployed unit models by player + instanceId so we can remove/update them.
 local deployed: { [Player]: { [string]: Model } } = {}
 local deathConnections: { [Model]: RBXScriptConnection } = {}
+local healthBarConnections: { [Model]: RBXScriptConnection } = {}
 local deadForRun: { [number]: { [string]: boolean } } = {}
 type PlacementRecord = {
 	unitId: string,
@@ -120,6 +131,24 @@ local function getLivingUnitCount(context: RunContext): number
 	return livingCount
 end
 
+-- Green at full health, yellow at half, red at empty — same two-segment
+-- lerp Roblox's own default Humanoid health bar uses.
+local function healthBarColor(fraction: number): Color3
+	fraction = math.clamp(fraction, 0, 1)
+	if fraction > 0.5 then
+		return Color3.new(1, 1, 0):Lerp(Color3.new(0, 1, 0), (fraction - 0.5) * 2)
+	end
+	return Color3.new(1, 0, 0):Lerp(Color3.new(1, 1, 0), fraction * 2)
+end
+
+local function updateHealthBar(humanoid: Humanoid, fill: Frame, text: TextLabel)
+	local maxHealth = math.max(humanoid.MaxHealth, 1)
+	local fraction = math.clamp(humanoid.Health / maxHealth, 0, 1)
+	fill.Size = UDim2.fromScale(fraction, 1)
+	fill.BackgroundColor3 = healthBarColor(fraction)
+	text.Text = `{math.floor(humanoid.Health + 0.5)} / {math.floor(humanoid.MaxHealth + 0.5)}`
+end
+
 local function makeLabel(model: Model, config)
 	local rarity = RarityConfig[config.Rarity]
 	local head = model.PrimaryPart
@@ -133,20 +162,83 @@ local function makeLabel(model: Model, config)
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "DeployLabel"
-	billboard.Size = UDim2.fromOffset(120, 30)
+	billboard.Size = UDim2.fromOffset(110, 38)
 	billboard.StudsOffset = Vector3.new(0, 3, 0)
 	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = math.huge -- default (100 studs) was hiding it outright at range
 	billboard.Adornee = head
 	billboard.Parent = head
+	CollectionService:AddTag(billboard, UNIT_BILLBOARD_TAG)
 
+	-- All child Size/Position below is Scale-only (no Offset). The billboard's own
+	-- Size is rescaled every frame by client/UnitBillboardScale.client.luau to react
+	-- to camera distance — anything pixel-offset here would stop lining up the
+	-- moment the parent's absolute size changes, which previously pushed the bar
+	-- outside the shrunk billboard's bounds and made it seem to vanish.
 	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.fromScale(1, 1)
+	nameLabel.Size = UDim2.new(1, 0, 0.42, 0)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Font = Enum.Font.GothamBold
 	nameLabel.TextScaled = true
 	nameLabel.TextColor3 = rarity.Color
 	nameLabel.Text = config.DisplayName
 	nameLabel.Parent = billboard
+
+	local barBackground = Instance.new("Frame")
+	barBackground.Name = "HealthBarBackground"
+	barBackground.Size = UDim2.new(0.945, 0, 0.34, 0)
+	barBackground.Position = UDim2.new(0.027, 0, 0.53, 0)
+	barBackground.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+	barBackground.BackgroundTransparency = 0.15
+	barBackground.BorderSizePixel = 0
+	barBackground.ClipsDescendants = true
+	barBackground.Parent = billboard
+
+	local barBackgroundCorner = Instance.new("UICorner")
+	barBackgroundCorner.CornerRadius = UDim.new(0, 5)
+	barBackgroundCorner.Parent = barBackground
+
+	local barBackgroundStroke = Instance.new("UIStroke")
+	barBackgroundStroke.Color = Color3.new(0, 0, 0)
+	barBackgroundStroke.Thickness = 1
+	barBackgroundStroke.Transparency = 0
+	barBackgroundStroke.Parent = barBackground
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "HealthBarFill"
+	barFill.Size = UDim2.fromScale(1, 1)
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBackground
+
+	local barFillCorner = Instance.new("UICorner")
+	barFillCorner.CornerRadius = UDim.new(0, 5)
+	barFillCorner.Parent = barFill
+
+	local hpText = Instance.new("TextLabel")
+	hpText.Name = "HealthText"
+	hpText.Size = UDim2.fromScale(1, 1)
+	hpText.BackgroundTransparency = 1
+	hpText.Font = Enum.Font.GothamBold
+	hpText.TextScaled = true
+	hpText.TextColor3 = Color3.new(1, 1, 1)
+	hpText.TextStrokeTransparency = 0.5
+	hpText.ZIndex = 2
+	hpText.Parent = barBackground
+
+	local hpTextConstraint = Instance.new("UITextSizeConstraint")
+	hpTextConstraint.MaxTextSize = 11
+	hpTextConstraint.Parent = hpText
+
+	if hum then
+		updateHealthBar(hum, barFill, hpText)
+		local existingBarConnection = healthBarConnections[model]
+		if existingBarConnection then
+			existingBarConnection:Disconnect()
+		end
+		healthBarConnections[model] = hum.HealthChanged:Connect(function()
+			updateHealthBar(hum, barFill, hpText)
+		end)
+	end
 end
 
 local function removeRuntimeUnit(
@@ -174,6 +266,12 @@ local function removeRuntimeUnit(
 	if deathConnection then
 		deathConnections[model] = nil
 		deathConnection:Disconnect()
+	end
+
+	local healthBarConnection = healthBarConnections[model]
+	if healthBarConnection then
+		healthBarConnections[model] = nil
+		healthBarConnection:Disconnect()
 	end
 
 	UnitFollowService.Unregister(model)
@@ -356,6 +454,7 @@ spawnUnit = function(
 		hum.WalkSpeed = 0
 		hum.JumpPower = 0
 		hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
+		CollectionService:AddTag(hum, DAMAGE_NUMBER_TAG)
 	end
 
 	local _, size = model:GetBoundingBox()
