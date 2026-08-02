@@ -24,10 +24,10 @@ local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
 -- distance in proportion to the unit itself, instead of holding Roblox's default
 -- "stay legible" minimum size (which is what made it look oversized far away).
 local UNIT_BILLBOARD_TAG = "UnitBillboard"
--- Tag consumed by client/DamageNumbers.client.luau to know which Humanoids should
--- show floating damage numbers. Deployed units only for now — enemies can opt in
--- later just by tagging their Humanoid the same way (see EnemyPool.luau).
-local DAMAGE_NUMBER_TAG = "DamageNumberSource"
+-- Tag consumed by client/HealNumbers.client.luau — floating green numbers show
+-- when a unit's health goes UP (healed), separate from DamageNumbers.client.luau
+-- (which only watches enemies and only fires on health going down).
+local HEAL_NUMBER_TAG = "HealNumberSource"
 
 local UnitSpawner = {}
 
@@ -454,7 +454,7 @@ spawnUnit = function(
 		hum.WalkSpeed = 0
 		hum.JumpPower = 0
 		hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
-		CollectionService:AddTag(hum, DAMAGE_NUMBER_TAG)
+		CollectionService:AddTag(hum, HEAL_NUMBER_TAG)
 	end
 
 	local _, size = model:GetBoundingBox()

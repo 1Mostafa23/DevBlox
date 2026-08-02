@@ -1,7 +1,11 @@
 --!strict
 
-export type Archetype = "Tank" | "MeleeDPS" | "RangedDPS"
+export type Archetype = "Tank" | "MeleeDPS" | "RangedDPS" | "Healer"
 export type Rarity = "Common" | "Uncommon" | "Rare" | "Epic" | "Legendary" | "Mythic"
+-- "Damage" archetypes fight enemies; "Healer" restores allies' health instead.
+-- For a Healer archetype, Damage/AttackRange/AttackCooldown below are reused to
+-- mean heal-per-application/heal-range/heal-cooldown (see UnitFollowService.luau).
+export type Role = "Damage" | "Healer"
 
 export type CombatStats = {
 	MaxHealth: number,
@@ -13,6 +17,7 @@ export type CombatStats = {
 
 export type ArchetypeConfig = CombatStats & {
 	ModelScale: number,
+	Role: Role,
 }
 
 export type StatMultipliers = {
@@ -34,6 +39,7 @@ local archetypes: ArchetypeRegistry = {
 		AttackCooldown = 1.4,
 		AttackRange = 5,
 		ModelScale = 1.25,
+		Role = "Damage",
 	},
 	MeleeDPS = {
 		MaxHealth = 350,
@@ -42,6 +48,7 @@ local archetypes: ArchetypeRegistry = {
 		AttackCooldown = 0.8,
 		AttackRange = 5,
 		ModelScale = 1,
+		Role = "Damage",
 	},
 	RangedDPS = {
 		MaxHealth = 250,
@@ -50,6 +57,19 @@ local archetypes: ArchetypeRegistry = {
 		AttackCooldown = 1.1,
 		AttackRange = 20,
 		ModelScale = 1,
+		Role = "Damage",
+	},
+	-- Pure support: no attack, heals the lowest-HP deployed unit (itself included).
+	-- Survivability/range/cooldown carried over from RangedDPS; Damage here means
+	-- heal-per-application, scaled by rarity the same way a normal Damage stat is.
+	Healer = {
+		MaxHealth = 250,
+		WalkSpeed = 9,
+		Damage = 20,
+		AttackCooldown = 1.1,
+		AttackRange = 35,
+		ModelScale = 1,
+		Role = "Healer",
 	},
 }
 

@@ -43,11 +43,12 @@ type Registration = {
 	humanoid: Humanoid,
 	rootPart: BasePart,
 	state: MovementState,
+	role: UnitConfig.Role,
 	target: Target?,
 	offset: Vector3?,
 	stopDistance: number,
 	attackRange: number,
-	damage: number,
+	power: number, -- damage dealt (Role="Damage") or health restored (Role="Healer")
 	attackCooldown: number,
 	nextAttackTime: number,
 	nextTargetRefresh: number,
@@ -81,7 +82,7 @@ local function isInsideBossTrigger(registration: Registration, position: Vector3
 		and math.abs(localPosition.Z) <= halfSize.Z
 end
 
-local function isTargetValid(registration: Registration, target: Target): boolean
+local function isEnemyTargetValid(registration: Registration, target: Target): boolean
 	return target.model:GetAttribute("PoolActive") == true
 		and matchesRun(target.model, registration)
 		and target.model:IsDescendantOf(registration.arenaContext.ActiveEnemies)
@@ -90,7 +91,23 @@ local function isTargetValid(registration: Registration, target: Target): boolea
 		and isInsideBossTrigger(registration, target.rootPart.Position)
 end
 
-local function getLivingTargets(registration: Registration): { Target }
+-- A damaged (but living) ally, including the healer itself.
+local function isAllyTargetValid(registration: Registration, target: Target): boolean
+	return matchesRun(target.model, registration)
+		and target.model:IsDescendantOf(registration.arenaContext.DeployedUnits)
+		and target.humanoid.Health > 0
+		and target.humanoid.Health < target.humanoid.MaxHealth
+		and target.rootPart.Parent ~= nil
+end
+
+local function isTargetValid(registration: Registration, target: Target): boolean
+	if registration.role == "Healer" then
+		return isAllyTargetValid(registration, target)
+	end
+	return isEnemyTargetValid(registration, target)
+end
+
+local function getLivingEnemyTargets(registration: Registration): { Target }
 	local targets: { Target } = {}
 
 	for _, enemy in registration.arenaContext.ActiveEnemies:GetChildren() do
@@ -120,6 +137,44 @@ local function getLivingTargets(registration: Registration): { Target }
 	return targets
 end
 
+-- Every damaged deployed unit in this run, healer itself included (self-heal allowed).
+local function getLivingAllyTargets(registration: Registration): { Target }
+	local targets: { Target } = {}
+
+	for _, ally in registration.arenaContext.DeployedUnits:GetChildren() do
+		if not ally:IsA("Model") then
+			continue
+		end
+		if not matchesRun(ally, registration) then
+			continue
+		end
+
+		local humanoid = ally:FindFirstChildOfClass("Humanoid")
+		local rootPart = ally:FindFirstChild("HumanoidRootPart")
+		if humanoid
+			and humanoid.Health > 0
+			and humanoid.Health < humanoid.MaxHealth
+			and rootPart
+			and rootPart:IsA("BasePart")
+		then
+			table.insert(targets, {
+				model = ally,
+				humanoid = humanoid,
+				rootPart = rootPart,
+			})
+		end
+	end
+
+	return targets
+end
+
+local function getLivingTargets(registration: Registration): { Target }
+	if registration.role == "Healer" then
+		return getLivingAllyTargets(registration)
+	end
+	return getLivingEnemyTargets(registration)
+end
+
 local function findNearestTarget(position: Vector3, targets: { Target }): Target?
 	local nearestTarget: Target? = nil
 	local nearestDistance = math.huge
@@ -133,6 +188,28 @@ local function findNearestTarget(position: Vector3, targets: { Target }): Target
 	end
 
 	return nearestTarget
+end
+
+-- Lowest current HP wins — a healer's priority target.
+local function findLowestHealthTarget(targets: { Target }): Target?
+	local lowestTarget: Target? = nil
+	local lowestHealth = math.huge
+
+	for _, target in targets do
+		if target.humanoid.Health < lowestHealth then
+			lowestHealth = target.humanoid.Health
+			lowestTarget = target
+		end
+	end
+
+	return lowestTarget
+end
+
+local function chooseTarget(registration: Registration, targets: { Target }): Target?
+	if registration.role == "Healer" then
+		return findLowestHealthTarget(targets)
+	end
+	return findNearestTarget(registration.rootPart.Position, targets)
 end
 
 local function setTarget(registration: Registration, target: Target?)
@@ -184,7 +261,15 @@ local function updateEngagedFacing(registration: Registration, target: BasePart)
 	end
 end
 
-local function tryAttack(registration: Registration, target: Target)
+local function applyEffect(registration: Registration, target: Target)
+	if registration.role == "Healer" then
+		target.humanoid.Health = math.min(target.humanoid.MaxHealth, target.humanoid.Health + registration.power)
+	else
+		target.humanoid:TakeDamage(registration.power)
+	end
+end
+
+local function tryAct(registration: Registration, target: Target)
 	local now = time()
 	if not registration.waveActive
 		or now < registration.nextAttackTime
@@ -197,7 +282,7 @@ local function tryAttack(registration: Registration, target: Target)
 	end
 
 	registration.nextAttackTime = now + registration.attackCooldown
-	target.humanoid:TakeDamage(registration.damage)
+	applyEffect(registration, target)
 end
 
 function UnitFollowService.Register(unit: Model, arenaContext: ArenaContext)
@@ -258,6 +343,7 @@ function UnitFollowService.Register(unit: Model, arenaContext: ArenaContext)
 		humanoid = humanoid,
 		rootPart = rootPart,
 		state = if activeRuns[runKey] then "Chasing" else "Idle",
+		role = archetype.Role,
 		target = nil,
 		offset = nil,
 		stopDistance = math.max(
@@ -265,7 +351,7 @@ function UnitFollowService.Register(unit: Model, arenaContext: ArenaContext)
 			stats.AttackRange + rng:NextNumber(MIN_STOP_VARIATION, MAX_STOP_VARIATION)
 		),
 		attackRange = stats.AttackRange,
-		damage = stats.Damage,
+		power = stats.Damage,
 		attackCooldown = stats.AttackCooldown,
 		nextAttackTime = 0,
 		nextTargetRefresh = 0,
@@ -465,7 +551,7 @@ task.spawn(function()
 			end
 
 			if not target or now >= registration.nextTargetRefresh then
-				target = findNearestTarget(rootPart.Position, getLivingTargets(registration))
+				target = chooseTarget(registration, getLivingTargets(registration))
 				setTarget(registration, target)
 				registration.nextTargetRefresh = now + TARGET_REFRESH_INTERVAL
 			end
@@ -477,7 +563,7 @@ task.spawn(function()
 			end
 
 			local distance = (target.rootPart.Position - rootPart.Position).Magnitude
-			tryAttack(registration, target)
+			tryAct(registration, target)
 			if not isTargetValid(registration, target) then
 				setTarget(registration, nil)
 				registration.nextTargetRefresh = 0

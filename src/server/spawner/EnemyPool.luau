@@ -15,6 +15,10 @@ local UNIT_BILLBOARD_TAG = "UnitBillboard"
 -- Always red, unlike the deployed-unit bar's green->yellow->red, so enemies read
 -- as hostile at a glance regardless of their remaining health.
 local ENEMY_BAR_COLOR = Color3.fromRGB(220, 60, 60)
+-- Tag consumed by client/DamageNumbers.client.luau — floating numbers show
+-- damage dealt TO enemies (by the player's weapon or deployed units), not
+-- damage taken by units/the player.
+local DAMAGE_NUMBER_TAG = "DamageNumberSource"
 
 type PartDefaults = {
 	transparency: number,
@@ -221,7 +225,9 @@ local function createModel(enemyType: string, pool: Pool): Model
 	model:SetAttribute("EnemyType", enemyType)
 	enemyTypes[model] = enemyType
 	defaultsByModel[model] = captureDefaults(model)
-	makeHealthBar(model, getHumanoid(model))
+	local humanoid = getHumanoid(model)
+	makeHealthBar(model, humanoid)
+	CollectionService:AddTag(humanoid, DAMAGE_NUMBER_TAG)
 	return model
 end
 
