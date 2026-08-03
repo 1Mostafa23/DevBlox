@@ -29,6 +29,7 @@ local messages = {
 	cooldown = "Rolling too fast — wait a moment!",
 	busy = "Still rolling...",
 	no_units = "No units available.",
+	insufficient_gold = "Not enough gold to roll.",
 }
 
 local showToken = 0

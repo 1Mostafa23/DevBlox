@@ -8,6 +8,8 @@ local ProfileStore = require(ServerStorage:WaitForChild("ProfileStore"))
 
 local DATA_TEMPLATE = {
 	Units = {},  -- [instanceId] = { UnitId, Level, XP }
+	Gold = 0,
+	Essence = 0,
 }
 
 local storeName: string

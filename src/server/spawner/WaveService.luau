@@ -8,6 +8,7 @@ local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
 local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
 local PlayerHealthBar = require(script.Parent.Parent.players.PlayerHealthBar)
+local CurrencyService = require(script.Parent.Parent.players.CurrencyService)
 local RunContextModule = require(script.Parent.RunContext)
 local WaveConfig = require(script.Parent.WaveConfig)
 
@@ -118,7 +119,13 @@ local function runWaves(context: RunContext, generation: number)
 			end
 
 			context.ActiveCleanups[enemy] = cleanup
-			deathConnection = humanoid.Died:Connect(cleanup)
+			deathConnection = humanoid.Died:Connect(function()
+				-- Only a genuine kill fires Died — cleanup() also runs on forced
+				-- run-stop/despawn, which must NOT grant currency. Capture position
+				-- now, before cleanup() pools/repositions the model.
+				CurrencyService.GrantKillReward(owner, enemyId, context.CurrentWave, enemy:GetPivot().Position)
+				cleanup()
+			end)
 
 			if enemyNumber < wave.enemyCount then
 				task.wait(wave.spawnInterval)

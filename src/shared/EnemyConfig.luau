@@ -3,6 +3,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CombatArchetypes = require(Shared:WaitForChild("CombatArchetypes"))
+local CurrencyConfig = require(Shared:WaitForChild("CurrencyConfig"))
 
 -- One enemy type per archetype for now. Each EnemyId needs a matching model
 -- (ReplicatedStorage.Enemies.<name>) and an EnemyPool.Register call at the
@@ -14,6 +15,8 @@ export type EnemyId = "enemy" | "enemy1"
 export type EnemyDefinition = CombatArchetypes.CombatStats & {
 	Archetype: CombatArchetypes.Archetype,
 	ModelScale: number,
+	-- Drives CurrencyConfig's per-kill gold/essence reward, independent of Archetype.
+	Tier: CurrencyConfig.Tier,
 }
 
 export type Registry = { [EnemyId]: EnemyDefinition }
@@ -51,11 +54,12 @@ local enemyArchetypes: CombatArchetypes.ArchetypeRegistry = {
 	},
 }
 
-local function fromArchetype(archetype: CombatArchetypes.Archetype): EnemyDefinition
+local function fromArchetype(archetype: CombatArchetypes.Archetype, tier: CurrencyConfig.Tier): EnemyDefinition
 	local base = enemyArchetypes[archetype]
 	assert(base, `Unknown archetype "{archetype}"`)
 	return {
 		Archetype = archetype,
+		Tier = tier,
 		MaxHealth = base.MaxHealth,
 		WalkSpeed = base.WalkSpeed,
 		Damage = base.Damage,
@@ -68,9 +72,9 @@ end
 local EnemyConfig: Registry = {
 	-- Same numbers as before this file existed in archetype form — no gameplay
 	-- change for the pre-existing enemy.
-	enemy = fromArchetype("MeleeDPS"),
+	enemy = fromArchetype("MeleeDPS", "Common"),
 	-- ReplicatedStorage.Enemies.enemy1 — tanky, slow, still hits decently hard.
-	enemy1 = fromArchetype("Tank"),
+	enemy1 = fromArchetype("Tank", "Uncommon"),
 }
 
 return EnemyConfig
