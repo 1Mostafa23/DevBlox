@@ -17,6 +17,7 @@ local ReturnUnit = RemotesFolder:WaitForChild("ReturnUnit") :: RemoteFunction
 local SetUnitRotation = RemotesFolder:WaitForChild("SetUnitRotation") :: RemoteFunction
 local UnitDatabase = require(Shared.UnitDatabase)
 local PlacementController = require(script.Parent:WaitForChild("PlacementController"))
+local ArenaClientContext = require(script.Parent:WaitForChild("ArenaClientContext"))
 
 -- ===== Selection state =====
 local selectedModel: Model? = nil
@@ -347,7 +348,9 @@ local function select(model: Model)
 end
 
 local function findDeployedModel(inst: Instance?): Model?
-	local deployedFolder = Workspace:FindFirstChild("DeployedUnits")
+	local arena = ArenaClientContext.GetArena()
+	if not arena then return nil end
+	local deployedFolder = arena:FindFirstChild("DeployedUnits")
 	if not deployedFolder then return nil end
 	local node = inst
 	while node and node ~= Workspace do
@@ -434,7 +437,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 local function updateDeploymentLock()
-	if not isDeploymentLocked() then
+	if not isDeploymentLocked() and ArenaClientContext.GetArena() then
 		screen.Enabled = true
 		return
 	end
@@ -448,6 +451,7 @@ local function updateDeploymentLock()
 end
 
 player:GetAttributeChangedSignal("DeploymentLocked"):Connect(updateDeploymentLock)
+ArenaClientContext.Changed:Connect(updateDeploymentLock)
 updateDeploymentLock()
 
 -- Release anywhere (not just over the button) stops an active hold-rotate.

@@ -11,10 +11,12 @@ local RarityConfig = require(Shared.RarityConfig)
 local DisplayModels = Shared:WaitForChild("DisplayModels")
 
 local RollController = require(script.Parent:WaitForChild("RollController"))
+local ArenaClientContext = require(script.Parent:WaitForChild("ArenaClientContext"))
 
 -- Find the podium spot on the altar.
 local function getSpotCFrame(): CFrame?
-	local altar = Workspace:FindFirstChild("SummonAltar")
+	local arena = ArenaClientContext.GetArena()
+	local altar = arena and arena:FindFirstChild("SummonAltar")
 	if not altar then return nil end
 	local spot = altar:FindFirstChild("PreviewSpot", true)
 	if spot and spot:IsA("BasePart") then
@@ -82,8 +84,16 @@ local function clearFake()
 	if currentFake then currentFake:Destroy() currentFake = nil end
 end
 
+local arenaGeneration = 0
+ArenaClientContext.Changed:Connect(function()
+	arenaGeneration += 1
+	clearFake()
+end)
+
 -- The slot-machine spin: fast at first, slowing to a stop over ~2s.
 local function playSpin(finalUnit)
+	if not ArenaClientContext.GetArena() then return end
+	local generation = arenaGeneration
 	local allUnits = UnitDatabase.GetAll()
 	local elapsed = 0
 	local total = 2.0
@@ -92,6 +102,10 @@ local function playSpin(finalUnit)
 
 	while elapsed < total do
 		local dt = RunService.RenderStepped:Wait()
+		if generation ~= arenaGeneration then
+			clearFake()
+			return
+		end
 		elapsed += dt
 		nextSwap -= dt
 		if nextSwap <= 0 then

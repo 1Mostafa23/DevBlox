@@ -5,20 +5,26 @@ local Players = game:GetService("Players")
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local InventoryService = require(script.Parent.InventoryService)
-local ArenaService = require(script.Parent.Parent.arena.ArenaService)
+local ArenaAllocationService = require(script.Parent.Parent.arena.ArenaAllocationService)
 local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
 local WaveService = require(script.Parent.Parent.spawner.WaveService)
 
-local arenaContext = ArenaService.GetCurrent()
-
 local function respawnDeployed(player: Player)
+	local playerArenaContext = ArenaAllocationService.Allocate(player)
+	if not playerArenaContext then
+		warn(`[DeployRespawn] no_free_arena for {player.Name}`)
+		return
+	end
+
 	local profile = PlayerDataService.WaitForProfile(player, 15)
 	if not profile then return end
 
 	for instanceId, unit in profile.Data.Units do
 		if unit.Deployed and unit.Position then
 			local runContext = WaveService.GetRunContext(player)
-			local playerArenaContext = if runContext then runContext.ArenaContext else arenaContext
+			if runContext and runContext.ArenaContext ~= playerArenaContext then
+				continue
+			end
 			local runGeneration = if runContext then runContext.RunGeneration else 0
 			local savedZonePosition = unit.ZonePosition
 			local savedPosition: Vector3
@@ -67,8 +73,3 @@ for _, player in Players:GetPlayers() do
 	task.spawn(respawnDeployed, player)
 end
 Players.PlayerAdded:Connect(respawnDeployed)
-
--- Clean up deployed models when a player leaves.
-Players.PlayerRemoving:Connect(function(player)
-	UnitSpawner.DespawnAll(player)
-end)

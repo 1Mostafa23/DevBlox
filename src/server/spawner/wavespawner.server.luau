@@ -1,4 +1,3 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local WaveService = require(script.Parent.WaveService)
@@ -140,7 +139,7 @@ end
 
 RequestWaveStart.OnServerEvent:Connect(function(player)
 	local context = WaveService.GetOrCreateRunContext(player)
-	if context.StartRequested or context.Started then
+	if not context or context.StartRequested or context.Started then
 		return
 	end
 
@@ -165,8 +164,4 @@ end)
 
 RequestWaveStop.OnServerEvent:Connect(function(player)
 	stopActiveWave(player, "manual")
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-	WaveService.RemoveRunContext(player)
 end)

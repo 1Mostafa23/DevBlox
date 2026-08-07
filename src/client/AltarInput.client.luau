@@ -4,16 +4,21 @@ local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local RollController = require(script.Parent:WaitForChild("RollController"))
+local ArenaClientContext = require(script.Parent:WaitForChild("ArenaClientContext"))
 local player = Players.LocalPlayer
+local currentAltar: Instance? = nil
+
+local function updateArena()
+	local arena = ArenaClientContext.GetArena()
+	currentAltar = if arena then arena:FindFirstChild("SummonAltar") else nil
+end
 
 local function isInAltar(prompt: Instance): boolean
-	local node = prompt.Parent
-	while node do
-		if node.Name == "SummonAltar" then return true end
-		node = node.Parent
-	end
-	return false
+	return currentAltar ~= nil and prompt:IsDescendantOf(currentAltar)
 end
+
+ArenaClientContext.Changed:Connect(updateArena)
+updateArena()
 
 ProximityPromptService.PromptTriggered:Connect(function(prompt, plr)
 	if plr ~= player then return end

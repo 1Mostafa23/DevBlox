@@ -14,6 +14,7 @@ local RequestRoll = RemotesFolder:WaitForChild("RequestRoll") :: RemoteFunction
 local ResolveRoll = RemotesFolder:WaitForChild("ResolveRoll") :: RemoteEvent
 local InventoryService = require(script.Parent.Parent.Data.InventoryService)
 local CurrencyService = require(script.Parent.Parent.players.CurrencyService)
+local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local PreviewSpawner = require(script.Parent.PreviewSpawner)
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
@@ -46,11 +47,16 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
 	if not unitId then return end
 	if not tryClaim(player, unitId) then return end -- can't afford it; leave the pending roll intact
 	pendingRoll[player] = nil
-	PreviewSpawner.Clear()
+	PreviewSpawner.Clear(player)
 end)
 
 -- Client asks to roll. Server decides.
 RequestRoll.OnServerInvoke = function(player: Player)
+	local arenaContext = ArenaService.GetForPlayer(player)
+	if not arenaContext then
+		return { ok = false, reason = "no_arena" }
+	end
+
 	-- Server-side cooldown (authoritative; client can't bypass).
 	local now = os.clock()
 	local last = lastRoll[player]
@@ -70,7 +76,7 @@ RequestRoll.OnServerInvoke = function(player: Player)
 	-- If there's an unclaimed preview, rerolling discards it.
 	if pendingRoll[player] then
 		pendingRoll[player] = nil
-		PreviewSpawner.Clear()
+		PreviewSpawner.Clear(player)
 	end
 
 	isRolling[player] = true
@@ -90,7 +96,7 @@ RequestRoll.OnServerInvoke = function(player: Player)
 	-- Delay the real spawn to coincide with the end of the client spin (~2s).
 	task.delay(2, function()
 		if pendingRoll[player] == unit.Id then
-			PreviewSpawner.Show(unit.Id)
+			PreviewSpawner.Show(player, unit.Id)
 		end
 	end)
 	return { ok = true, unitId = unit.Id }
@@ -106,7 +112,7 @@ ResolveRoll.OnServerEvent:Connect(function(player: Player, action: string)
 	end
 
 	pendingRoll[player] = nil
-	PreviewSpawner.Clear()
+	PreviewSpawner.Clear(player)
 	-- "discard" (or anything else) just clears it; next roll is now allowed.
 end)
 
@@ -115,4 +121,5 @@ Players.PlayerRemoving:Connect(function(player)
 	pendingRoll[player] = nil
 	isRolling[player] = nil
 	lastRoll[player] = nil
+	PreviewSpawner.Clear(player)
 end)

@@ -12,6 +12,7 @@ export type ArenaContext = {
 	DeployedUnits: Folder,
 	Altar: Instance,
 	PreviewLocation: BasePart,
+	PlayerSpawn: BasePart?,
 }
 
 export type ArenaContextInit = {
@@ -24,6 +25,7 @@ export type ArenaContextInit = {
 	DeployedUnits: Folder,
 	Altar: Instance,
 	PreviewLocation: BasePart,
+	PlayerSpawn: BasePart?,
 }
 
 local ArenaContext = {}
@@ -44,6 +46,7 @@ function ArenaContext.new(init: ArenaContextInit): ArenaContext
 		DeployedUnits = init.DeployedUnits,
 		Altar = init.Altar,
 		PreviewLocation = init.PreviewLocation,
+		PlayerSpawn = init.PlayerSpawn,
 	}
 end
 

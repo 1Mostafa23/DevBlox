@@ -18,8 +18,6 @@ local RemotesFolder = Shared:WaitForChild("Remotes")
 local DeployUnit = RemotesFolder:WaitForChild("DeployUnit") :: RemoteFunction
 local ReturnUnit = RemotesFolder:WaitForChild("ReturnUnit") :: RemoteFunction
 local SetUnitRotation = RemotesFolder:WaitForChild("SetUnitRotation") :: RemoteFunction
-local arenaContext = ArenaService.GetCurrent()
-
 local function findDeployedModel(instance: Instance, deployedFolder: Instance): Model?
 	local current: Instance? = instance
 	while current and current ~= deployedFolder do
@@ -74,6 +72,10 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 	if WaveService.IsDeploymentLocked(player) then
 		return { ok = false, reason = "run_active" }
 	end
+	local playerArenaContext = ArenaService.GetForPlayer(player)
+	if not playerArenaContext then
+		return { ok = false, reason = "no_arena" }
+	end
 
 	-- Validate the player owns this unit.
 	local units = InventoryService.GetUnits(player)
@@ -85,7 +87,9 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 		return { ok = false, reason = "unit_dead" }
 	end
 	local runContext = WaveService.GetRunContext(player)
-	local playerArenaContext = if runContext then runContext.ArenaContext else arenaContext
+	if runContext and runContext.ArenaContext ~= playerArenaContext then
+		return { ok = false, reason = "arena_mismatch" }
+	end
 	local runGeneration = if runContext then runContext.RunGeneration else 0
 
 	-- Validate and project placement onto the designated zone's top surface.
@@ -136,6 +140,9 @@ SetUnitRotation.OnServerInvoke = function(player: Player, instanceId: string, ro
 	if WaveService.IsDeploymentLocked(player) then
 		return { ok = false, reason = "run_active" }
 	end
+	if not ArenaService.GetForPlayer(player) then
+		return { ok = false, reason = "no_arena" }
+	end
 
 	local units = InventoryService.GetUnits(player)
 	local unit = units[instanceId]
@@ -157,6 +164,9 @@ ReturnUnit.OnServerInvoke = function(player: Player, instanceId: string)
 	end
 	if WaveService.IsDeploymentLocked(player) then
 		return { ok = false, reason = "run_active" }
+	end
+	if not ArenaService.GetForPlayer(player) then
+		return { ok = false, reason = "no_arena" }
 	end
 
 	local units = InventoryService.GetUnits(player)

@@ -28,13 +28,18 @@ local function isRunActive(context: RunContext, generation: number): boolean
 	return context.Started and context.RunGeneration == generation
 end
 
-function WaveService.GetOrCreateRunContext(owner: Player): RunContext
-	local existing = runContexts[owner]
-	if existing then
-		return existing
+function WaveService.GetOrCreateRunContext(owner: Player): RunContext?
+	local arenaContext = ArenaService.GetForPlayer(owner)
+	if not arenaContext then
+		return nil
 	end
 
-	local context = RunContextModule.new(owner, ArenaService.GetCurrent())
+	local existing = runContexts[owner]
+	if existing then
+		return if existing.ArenaContext == arenaContext then existing else nil
+	end
+
+	local context = RunContextModule.new(owner, arenaContext)
 	runContexts[owner] = context
 	return context
 end
@@ -167,7 +172,7 @@ end
 
 function WaveService.Start(owner: Player): boolean
 	local context = WaveService.GetOrCreateRunContext(owner)
-	if context.Started then
+	if not context or context.Started then
 		return false
 	end
 

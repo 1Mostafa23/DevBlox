@@ -11,6 +11,7 @@ local DisplayModels = Shared:WaitForChild("DisplayModels")
 require(Shared.Remotes)
 local RemotesFolder = Shared:WaitForChild("Remotes")
 local DeployUnit = RemotesFolder:WaitForChild("DeployUnit") :: RemoteFunction
+local ArenaClientContext = require(script.Parent:WaitForChild("ArenaClientContext"))
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
@@ -53,6 +54,9 @@ end
 
 -- Raycast from the mouse/touch into the world, return the hit position.
 local function getWorldPosition(): (Vector3?, boolean)
+	local arena = ArenaClientContext.GetArena()
+	if not arena then return nil, false end
+
 	local mouseLocation = UserInputService:GetMouseLocation()
 	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
 	local params = RaycastParams.new()
@@ -60,9 +64,9 @@ local function getWorldPosition(): (Vector3?, boolean)
 	local filter: { Instance } = {}
 	if player.Character then table.insert(filter, player.Character) end
 	if ghost then table.insert(filter, ghost) end
-	local activeEnemies = Workspace:FindFirstChild("ActiveEnemies")
+	local activeEnemies = arena:FindFirstChild("ActiveEnemies")
 	if activeEnemies then table.insert(filter, activeEnemies) end
-	local deployedUnits = Workspace:FindFirstChild("DeployedUnits")
+	local deployedUnits = arena:FindFirstChild("DeployedUnits")
 	if deployedUnits then table.insert(filter, deployedUnits) end
 	params.FilterDescendantsInstances = filter
 
@@ -70,7 +74,7 @@ local function getWorldPosition(): (Vector3?, boolean)
 	if not result then return nil, false end
 
 	-- is the hit inside the DeployZone?
-	local zone = Workspace:FindFirstChild("DeployZone")
+	local zone = arena:FindFirstChild("DeployZone")
 	local inZone = false
 	if zone and zone:IsA("BasePart") then
 		local localPoint = zone.CFrame:PointToObjectSpace(result.Position)
@@ -92,7 +96,11 @@ local function findDeployedModel(instance: Instance, deployedFolder: Instance): 
 end
 
 local function isOccupied(boundsCFrame: CFrame, boundsSize: Vector3): boolean
-	local deployedFolder = Workspace:FindFirstChild("DeployedUnits")
+	local arena = ArenaClientContext.GetArena()
+	if not arena then
+		return true
+	end
+	local deployedFolder = arena:FindFirstChild("DeployedUnits")
 	if not deployedFolder then
 		return false
 	end
@@ -126,7 +134,7 @@ local function getPlacement(): (Vector3?, CFrame?, boolean)
 end
 
 function PlacementController.Begin(instanceId: string, modelName: string, rotationY: number?)
-	if isDeploymentLocked() then return end
+	if isDeploymentLocked() or not ArenaClientContext.GetArena() then return end
 	if active then PlacementController.Cancel() end
 	currentRotationY = rotationY or 0
 	local source = DisplayModels:FindFirstChild(modelName)
@@ -201,6 +209,10 @@ player:GetAttributeChangedSignal("DeploymentLocked"):Connect(function()
 	if isDeploymentLocked() then
 		PlacementController.Cancel()
 	end
+end)
+
+ArenaClientContext.Changed:Connect(function()
+	PlacementController.Cancel()
 end)
 
 return PlacementController

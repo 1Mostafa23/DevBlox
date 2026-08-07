@@ -1,21 +1,23 @@
 --!strict
 -- ServerScriptService/Server/Summoning/PreviewSpawner.luau
 local ServerStorage = game:GetService("ServerStorage")
-local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local UnitDatabase = require(Shared.UnitDatabase)
 local RarityConfig = require(Shared.RarityConfig)
 local ArenaService = require(script.Parent.Parent.arena.ArenaService)
+local ArenaContextModule = require(script.Parent.Parent.arena.ArenaContext)
+
+type ArenaContext = ArenaContextModule.ArenaContext
 
 local UnitModels = ServerStorage:WaitForChild("UnitModels")
-local arena = ArenaService.GetCurrent()
 
 local PreviewSpawner = {}
 
 -- Find the altar's preview spot. Returns the CFrame to place the NPC.
-local function getSpotCFrame(): CFrame?
+local function getSpotCFrame(arena: ArenaContext): CFrame?
 	return arena.PreviewLocation.CFrame
 end
 
@@ -59,12 +61,23 @@ local function makeLabel(model: Model, unitConfig)
 	rarityLabel.Parent = billboard
 end
 
--- Current preview (one at a time).
-local currentPreview: Model? = nil
+local previewsByPlayer: { [Player]: Model } = {}
+
+function PreviewSpawner.Clear(player: Player)
+	local preview = previewsByPlayer[player]
+	if preview then
+		preview:Destroy()
+		previewsByPlayer[player] = nil
+	end
+end
 
 -- Spawns the preview NPC for a unit id. Despawns any existing one first.
-function PreviewSpawner.Show(unitId: string)
-	PreviewSpawner.Clear()
+function PreviewSpawner.Show(player: Player, unitId: string)
+	PreviewSpawner.Clear(player)
+	local arena = ArenaService.GetForPlayer(player)
+	if not arena then
+		return
+	end
 
 	local config = UnitDatabase.GetById(unitId)
 	if not config then
@@ -78,7 +91,7 @@ function PreviewSpawner.Show(unitId: string)
 		return
 	end
 
-	local spot = getSpotCFrame()
+	local spot = getSpotCFrame(arena)
 	if not spot then
 		warn("PreviewSpawner: no PreviewSpot found on SummonAltar")
 		return
@@ -93,7 +106,9 @@ function PreviewSpawner.Show(unitId: string)
 	end
 
 	model:PivotTo(spot)
-	model.Parent = Workspace
+	model:SetAttribute("OwnerUserId", player.UserId)
+	model:SetAttribute("ArenaId", arena.ArenaId)
+	model.Parent = arena.ArenaModel
 	makeLabel(model, config)
     local head = model.PrimaryPart
 	if head then
@@ -108,15 +123,9 @@ function PreviewSpawner.Show(unitId: string)
 		prompt.Parent = head
     end
     
-	currentPreview = model
+	previewsByPlayer[player] = model
 end
 
--- Removes the current preview, if any.
-function PreviewSpawner.Clear()
-	if currentPreview then
-		currentPreview:Destroy()
-		currentPreview = nil
-	end
-end
+Players.PlayerRemoving:Connect(PreviewSpawner.Clear)
 
 return PreviewSpawner
