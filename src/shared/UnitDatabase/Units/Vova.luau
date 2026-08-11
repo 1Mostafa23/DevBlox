@@ -3,7 +3,7 @@
 return {
 	Id = "Vova",          -- unique, never reused
 	DisplayName = "Vova",
-	Rarity = "Uncommon",           -- must match a key in RarityConfig
+	Rarity = "Uncommon",  -- must match a key in RarityConfig
 	Archetype = "MeleeDPS",
 	ModelName = "Vova",    -- name of model in ServerStorage/UnitModels
 	-- optional per-unit weight override; nil = use rarity weight

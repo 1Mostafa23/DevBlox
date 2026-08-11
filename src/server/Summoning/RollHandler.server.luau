@@ -52,8 +52,10 @@ end)
 
 -- Client asks to roll. Server decides.
 RequestRoll.OnServerInvoke = function(player: Player)
+	print(`[RollHandler DEBUG] RequestRoll invoked by {player.Name}`)
 	local arenaContext = ArenaService.GetForPlayer(player)
 	if not arenaContext then
+		print("[RollHandler DEBUG] rejected: no_arena")
 		return { ok = false, reason = "no_arena" }
 	end
 

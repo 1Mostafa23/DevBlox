@@ -35,11 +35,14 @@ end
 
 for _, model in UnitModels:GetChildren() do
 	if model:IsA("Model") then
-		-- avoid duplicating if it already exists
-		if not displayFolder:FindFirstChild(model.Name) then
-			local copy = model:Clone()
-			sanitize(copy)
-			copy.Parent = displayFolder
+		-- Always refresh: a stale copy here (e.g. from before a UnitModels edit)
+		-- would otherwise persist forever, since this only runs once at startup.
+		local existing = displayFolder:FindFirstChild(model.Name)
+		if existing then
+			existing:Destroy()
 		end
+		local copy = model:Clone()
+		sanitize(copy)
+		copy.Parent = displayFolder
 	end
 end
