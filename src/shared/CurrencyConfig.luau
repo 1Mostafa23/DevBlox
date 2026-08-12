@@ -40,7 +40,7 @@ local WAVE_MULTIPLIER_PER_WAVE = 0.08
 local MAX_WAVE_MULTIPLIER = 3
 
 -- Gold cost to roll the summoning altar once.
-local ROLL_COST_GOLD = 60
+local ROLL_COST_GOLD = 0
 
 -- Essence cost to claim a rolled unit, by the UNIT's rarity (not enemy Tier —
 -- same 6-value scale, different axis). Roughly doubles per tier so essence
