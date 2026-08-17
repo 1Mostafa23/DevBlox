@@ -1,8 +1,11 @@
 --!strict
 -- ServerScriptService/Server/Data/InventoryService.luau
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
+local UnitDatabase = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("UnitDatabase"))
 
 local InventoryService = {}
 
@@ -90,6 +93,58 @@ function InventoryService.SetUnitRotation(player: Player, instanceId: string, ro
 
 	unit.RotationY = rotationY
 	return true
+end
+
+-- Removes any owned unit whose UnitId no longer resolves to a UnitDatabase
+-- definition (e.g. a unit that was claimed and later pulled from the game).
+-- These are permanent, silent junk in the save otherwise -- they'd sit there
+-- forever occupying inventory/deploy-slot counts for a unit that can't ever
+-- be displayed or spawned again. Returns how many were removed.
+function InventoryService.PruneOrphaned(player: Player): number
+	local profile = PlayerDataService.GetProfile(player)
+	if not profile then return 0 end
+
+	local removed = 0
+	for instanceId, unit in profile.Data.Units do
+		if not UnitDatabase.GetById(unit.UnitId) then
+			profile.Data.Units[instanceId] = nil
+			removed += 1
+		end
+	end
+	if removed > 0 then
+		warn(`InventoryService: pruned {removed} orphaned unit(s) from {player.Name}'s inventory`)
+	end
+	return removed
+end
+
+-- Deletes every owned unit (deployed or not). Debug/testing use only -- there's
+-- no undo and no refund of whatever Essence was spent claiming them.
+function InventoryService.ClearAll(player: Player): number
+	local profile = PlayerDataService.GetProfile(player)
+	if not profile then return 0 end
+
+	local removed = 0
+	for _ in profile.Data.Units do
+		removed += 1
+	end
+	profile.Data.Units = {}
+	return removed
+end
+
+local function onPlayerAdded(player: Player)
+	task.spawn(function()
+		local profile = PlayerDataService.WaitForProfile(player, 15)
+		if not profile then return end
+		InventoryService.PruneOrphaned(player)
+	end)
+end
+
+-- Prunes orphaned units once per session, right after a profile loads.
+function InventoryService.Setup()
+	for _, player in Players:GetPlayers() do
+		onPlayerAdded(player)
+	end
+	Players.PlayerAdded:Connect(onPlayerAdded)
 end
 
 return InventoryService

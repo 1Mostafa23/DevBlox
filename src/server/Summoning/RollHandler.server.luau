@@ -14,6 +14,7 @@ local RequestRoll = RemotesFolder:WaitForChild("RequestRoll") :: RemoteFunction
 local ResolveRoll = RemotesFolder:WaitForChild("ResolveRoll") :: RemoteEvent
 local InventoryService = require(script.Parent.Parent.Data.InventoryService)
 local CurrencyService = require(script.Parent.Parent.players.CurrencyService)
+local UpgradeService = require(script.Parent.Parent.players.UpgradeService)
 local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local PreviewSpawner = require(script.Parent.PreviewSpawner)
 local ProximityPromptService = game:GetService("ProximityPromptService")
@@ -23,6 +24,14 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local function tryClaim(player: Player, unitId: string): boolean
 	local definition = UnitDatabase.GetById(unitId)
 	if not definition then return false end
+
+	local owned = 0
+	for _ in InventoryService.GetUnits(player) do
+		owned += 1
+	end
+	if owned >= UpgradeService.GetEffect(player, "Inventory") then
+		return false -- inventory full; leave the pending roll intact so they can retry after freeing space
+	end
 
 	local cost = (CurrencyConfig.ClaimCostEssence :: { [string]: number })[definition.Rarity]
 	if not cost or not CurrencyService.TrySpendEssence(player, cost) then
@@ -83,7 +92,8 @@ RequestRoll.OnServerInvoke = function(player: Player)
 
 	isRolling[player] = true
 
-	local unit = RollService.RollOne(rng)
+	local luckBias = UpgradeService.GetEffect(player, "AltarLuck")
+	local unit = RollService.RollOne(rng, luckBias)
 	isRolling[player] = nil
 
 	if not unit then

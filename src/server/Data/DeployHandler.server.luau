@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local InventoryService = require(script.Parent.InventoryService)
+local UpgradeService = require(script.Parent.Parent.players.UpgradeService)
 local ArenaService = require(script.Parent.Parent.arena.ArenaService)
 local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
 local WaveService = require(script.Parent.Parent.spawner.WaveService)
@@ -86,6 +87,20 @@ DeployUnit.OnServerInvoke = function(player: Player, instanceId: string, positio
 	if UnitSpawner.IsUnavailableForRun(player, instanceId) then
 		return { ok = false, reason = "unit_dead" }
 	end
+
+	-- Repositioning an already-deployed unit calls this same remote, so exclude
+	-- it from its own count -- otherwise moving one of your units at a full
+	-- board sees itself as "using" a slot and rejects the move entirely.
+	local deployedCount = 0
+	for otherInstanceId, otherUnit in units do
+		if otherUnit.Deployed and otherInstanceId ~= instanceId then
+			deployedCount += 1
+		end
+	end
+	if deployedCount >= UpgradeService.GetEffect(player, "DeploySlots") then
+		return { ok = false, reason = "slots_full" }
+	end
+
 	local runContext = WaveService.GetRunContext(player)
 	if runContext and runContext.ArenaContext ~= playerArenaContext then
 		return { ok = false, reason = "arena_mismatch" }

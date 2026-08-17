@@ -82,11 +82,21 @@ end
 -- wave it died on. Call exactly once per actual kill (e.g. on Humanoid.Died).
 -- `position`, if given, fires a purely cosmetic drop/collect effect on the
 -- killer's client at that spot — it does not affect the actual grant.
-function CurrencyService.GrantKillReward(player: Player, enemyId: string, waveNumber: number, position: Vector3?)
+-- `goldMultiplier`, if given, applies the caller's Money Drop upgrade bonus
+-- (kept as a plain multiplier param here so this module doesn't need to know
+-- about UpgradeService — the caller looks the effect up and passes it in).
+function CurrencyService.GrantKillReward(
+	player: Player,
+	enemyId: string,
+	waveNumber: number,
+	position: Vector3?,
+	goldMultiplier: number?
+)
 	local definition = (EnemyConfig :: { [string]: EnemyConfig.EnemyDefinition })[enemyId]
 	if not definition then return end
 
 	local gold, essence = CurrencyConfig.GetKillReward(definition.Tier, definition.Archetype, waveNumber)
+	gold = math.floor(gold * (goldMultiplier or 1) + 0.5)
 	CurrencyService.AddGold(player, gold)
 	CurrencyService.AddEssence(player, essence)
 

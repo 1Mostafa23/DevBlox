@@ -9,6 +9,7 @@ local UnitSpawner = require(script.Parent.Parent.Summoning.UnitSpawner)
 local PlayerHealthService = require(script.Parent.Parent.players.PlayerHealthService)
 local PlayerHealthBar = require(script.Parent.Parent.players.PlayerHealthBar)
 local CurrencyService = require(script.Parent.Parent.players.CurrencyService)
+local UpgradeService = require(script.Parent.Parent.players.UpgradeService)
 local RunContextModule = require(script.Parent.RunContext)
 local WaveConfig = require(script.Parent.WaveConfig)
 
@@ -128,7 +129,8 @@ local function runWaves(context: RunContext, generation: number)
 				-- Only a genuine kill fires Died — cleanup() also runs on forced
 				-- run-stop/despawn, which must NOT grant currency. Capture position
 				-- now, before cleanup() pools/repositions the model.
-				CurrencyService.GrantKillReward(owner, enemyId, context.CurrentWave, enemy:GetPivot().Position)
+				local goldMultiplier = UpgradeService.GetEffect(owner, "MoneyDrop")
+				CurrencyService.GrantKillReward(owner, enemyId, context.CurrentWave, enemy:GetPivot().Position, goldMultiplier)
 				cleanup()
 			end)
 

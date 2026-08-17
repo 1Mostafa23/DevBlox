@@ -23,6 +23,7 @@ if RunService:IsServer() then
 	ensure("RemoteFunction", "ReturnUnit")   -- NEW
 	ensure("RemoteFunction", "SetUnitRotation")
 	ensure("RemoteEvent", "CurrencyDropped")
+	ensure("RemoteFunction", "RequestUpgrade")
 end
 
 return {}

@@ -10,6 +10,8 @@ local DATA_TEMPLATE = {
 	Units = {},  -- [instanceId] = { UnitId, Level, XP }
 	Gold = 0,
 	Essence = 0,
+	Upgrades = {},          -- [upgradeId] = level (missing = level 1)
+	ProcessedReceipts = {}, -- [purchaseId] = true; guards against double-granting a Robux purchase on retry
 }
 
 local storeName: string
