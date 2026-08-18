@@ -37,7 +37,7 @@ local WeaponConfig: Registry = {
 		},
 		Shop = {
 			DisplayName = "Basic Sword",
-			Price = 0,
+			Price = 50,
 			Rarity = "Common",
 		},
 	},

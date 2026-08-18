@@ -24,6 +24,7 @@ if RunService:IsServer() then
 	ensure("RemoteFunction", "SetUnitRotation")
 	ensure("RemoteEvent", "CurrencyDropped")
 	ensure("RemoteFunction", "RequestUpgrade")
+	ensure("RemoteFunction", "RequestWeaponPurchase")
 end
 
 return {}

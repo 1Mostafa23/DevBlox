@@ -12,6 +12,9 @@ local DATA_TEMPLATE = {
 	Essence = 0,
 	Upgrades = {},          -- [upgradeId] = level (missing = level 1)
 	ProcessedReceipts = {}, -- [purchaseId] = true; guards against double-granting a Robux purchase on retry
+	Weapons = {
+		Owned = {}, -- [weaponId] = true
+	},
 }
 
 local storeName: string
