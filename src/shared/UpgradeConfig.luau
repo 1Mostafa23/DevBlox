@@ -19,7 +19,7 @@ local UpgradeConfig: { [UpgradeId]: UpgradeDefinition } = {
 		DisplayName = "Gold Upgrade",
 		Description = "Increase the amount of gold you get from killing enemies!",
 		MaxLevel = 100,
-		BaseGoldCost = 200, GoldStep = 200,
+		BaseCost = 200, CostStep = 200, CostMode = "Additive",
 		BaseEffect = 1.0, EffectStep = 0.1, EffectMode = "Additive", -- +0.1x gold per level (1.0, 1.1, 1.2, ...)
 		RobuxProductId = 0,
 	},
@@ -28,7 +28,7 @@ local UpgradeConfig: { [UpgradeId]: UpgradeDefinition } = {
 		DisplayName = "Luck Upgrade",
 		Description = "Increase the chance of rolling rarer units!",
 		MaxLevel = 100,
-		BaseGoldCost = 500, GoldStep = 500,
+		BaseCost = 500, CostStep = 500, CostMode = "Additive",
 		BaseEffect = 0.0, EffectStep = 0.004, EffectMode = "Additive", -- +0.4% rarity shift per level
 		RobuxProductId = 0,
 	},
@@ -37,7 +37,7 @@ local UpgradeConfig: { [UpgradeId]: UpgradeDefinition } = {
 		DisplayName = "Slot Upgrade",
 		Description = "Unlock more slots to place more units!",
 		MaxLevel = 20, -- hard-capped much lower than the others -- +1 slot is a big power jump
-		BaseGoldCost = 1500, GoldStep = 3000,
+		BaseCost = 1500, CostStep = 3000, CostMode = "Additive",
 		BaseEffect = 4, EffectStep = 1, EffectMode = "Additive",
 		RobuxProductId = 0,
 	},
@@ -46,7 +46,7 @@ local UpgradeConfig: { [UpgradeId]: UpgradeDefinition } = {
 		DisplayName = "Inventory Upgrade",
 		Description = "Increase inventory capacity to store more units!",
 		MaxLevel = 50,
-		BaseGoldCost = 2000, GoldStep = 500,
+		BaseCost = 2000, CostStep = 500, CostMode = "Additive",
 		BaseEffect = 20, EffectStep = 10, EffectMode = "Additive", -- starts at 20 capacity
 		RobuxProductId = 0,
 	},

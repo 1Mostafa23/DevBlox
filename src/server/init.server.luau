@@ -4,6 +4,7 @@ local CurrencyService = require(script.players.CurrencyService)
 local UpgradeService = require(script.players.UpgradeService)
 local InventoryService = require(script.Data.InventoryService)
 local WeaponInventoryService = require(script.weapons.WeaponInventoryService)
+local ShardService = require(script.players.ShardService)
 require(script.players.PlayerHealthBar) -- side effects only: wires CharacterAdded
 
 ArenaAllocationService.Setup()
@@ -12,5 +13,6 @@ CurrencyService.Setup()
 UpgradeService.Setup()
 InventoryService.Setup()
 WeaponInventoryService.Setup()
+ShardService.Setup()
 
 print("Hello world, from server!")

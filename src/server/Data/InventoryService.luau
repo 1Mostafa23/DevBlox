@@ -26,6 +26,7 @@ function InventoryService.AddUnit(player: Player, unitId: string): string?
 	profile.Data.Units[id] = {
 		UnitId = unitId,
 		Level = 1,
+		LevelProgress = 0, -- Shards banked toward the next level (see UnitLevelService.ContributeShard)
 		XP = 0,
 		AcquiredAt = os.time(),
 		RotationY = 0,

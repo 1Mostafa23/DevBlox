@@ -1,36 +1,43 @@
 --!strict
 -- ReplicatedStorage/Shared/UpgradeCurve.luau
--- Generic cost/effect math shared by every leveled upgrade, so UpgradeConfig
--- itself stays a handful of tunable numbers per upgrade instead of one row
--- per level. Same "shape lives here, numbers live in the config" split as
--- CombatArchetypes.
+-- Generic cost/effect math shared by every leveled upgrade/unit-level, so each
+-- config stays a handful of tunable numbers instead of one row per level. Same
+-- "shape lives here, numbers live in the config" split as CombatArchetypes.
+-- Deliberately currency-agnostic (despite the "Cost" naming) -- account
+-- upgrades price this in Gold, unit leveling prices it in Shards; the curve
+-- math doesn't care which.
 local UpgradeCurve = {}
 
+export type CostMode = "Additive" | "Multiplicative"
 export type EffectMode = "Additive" | "Multiplicative"
 
 export type Curve = {
 	MaxLevel: number,
-	BaseGoldCost: number,   -- Gold cost to go from level 1 -> 2
-	GoldStep: number,       -- how much MORE the next level costs than the one before it (flat Gold, not a %)
+	BaseCost: number,   -- Cost to go from level 1 -> 2
+	CostStep: number,   -- Additive: flat amount added each level.
+	                    -- Multiplicative: factor the cost is multiplied by each level (e.g. 2 = doubles).
+	CostMode: CostMode,
 	BaseEffect: number,     -- Effect at level 1
 	EffectStep: number,     -- how much Effect changes per level
 	EffectMode: EffectMode, -- Additive: BaseEffect + EffectStep*(level-1)
 	                        -- Multiplicative: BaseEffect * EffectStep^(level-1)
-	GoldOverrides: { [number]: number }?,   -- hand-tune ONE level's cost, bypassing the curve
+	CostOverrides: { [number]: number }?,   -- hand-tune ONE level's cost, bypassing the curve
 	EffectOverrides: { [number]: number }?, -- same, for Effect
 }
 
--- Gold cost to move FROM (level-1) TO level. Level 1 is always free (starting tier).
--- Linear: BaseGoldCost at level 2, +GoldStep every level after that.
-function UpgradeCurve.GoldCost(curve: Curve, level: number): number
+-- Cost to move FROM (level-1) TO level. Level 1 is always free (starting tier).
+function UpgradeCurve.Cost(curve: Curve, level: number): number
 	if level <= 1 then
 		return 0
 	end
-	local override = curve.GoldOverrides and curve.GoldOverrides[level]
+	local override = curve.CostOverrides and curve.CostOverrides[level]
 	if override then
 		return override
 	end
-	return curve.BaseGoldCost + curve.GoldStep * (level - 2)
+	if curve.CostMode == "Multiplicative" then
+		return math.floor(curve.BaseCost * curve.CostStep ^ (level - 2) + 0.5)
+	end
+	return curve.BaseCost + curve.CostStep * (level - 2)
 end
 
 -- The active bonus once a player IS at this level.

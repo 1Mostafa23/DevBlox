@@ -1,5 +1,6 @@
 --!strict
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -8,6 +9,29 @@ local UnitConfig = require(Shared:WaitForChild("UnitConfig"))
 local UnitDatabase = require(Shared:WaitForChild("UnitDatabase"))
 local ArenaContextModule = require(script.Parent.Parent.arena.ArenaContext)
 local RunContextModule = require(script.Parent.Parent.spawner.RunContext)
+local UnitLevelService = require(script.Parent.Parent.players.UnitLevelService)
+
+-- Same level->power hook as UnitSpawner.luau -- this is where attack Damage
+-- actually gets applied, so leveling has to feed in here too, not just at
+-- the MaxHealth-setting spawn call, or a leveled-up unit would show more HP
+-- but still hit for base damage.
+local function levelMultipliers(ownerUserId: number, instanceId: any): UnitConfig.StatMultipliers?
+	if typeof(instanceId) ~= "string" then
+		return nil
+	end
+	local player = Players:GetPlayerByUserId(ownerUserId)
+	if not player then
+		return nil
+	end
+	local power = UnitLevelService.GetPowerMultiplier(player, instanceId)
+	return {
+		MaxHealth = power,
+		WalkSpeed = 1,
+		Damage = power,
+		AttackCooldown = 1,
+		AttackRange = 1,
+	}
+end
 
 type ArenaContext = ArenaContextModule.ArenaContext
 type RunContext = RunContextModule.RunContext
@@ -314,7 +338,12 @@ function UnitFollowService.Register(unit: Model, arenaContext: ArenaContext)
 		return
 	end
 
-	local stats = UnitConfig.ApplyMultipliers(archetype, rarityMultiplier)
+	local stats = UnitConfig.ApplyMultipliers(
+		archetype,
+		rarityMultiplier,
+		nil,
+		levelMultipliers(ownerUserId, unit:GetAttribute("InstanceId"))
+	)
 	local runKey = getRunKey(ownerUserId, arenaId, runGeneration)
 	local facingAttachment = Instance.new("Attachment")
 	facingAttachment.Name = "UnitFacingAttachment"
@@ -361,6 +390,42 @@ function UnitFollowService.Register(unit: Model, arenaContext: ArenaContext)
 	}
 	registrations[unit] = registration
 	setMovementState(registration, registration.state)
+end
+
+-- Called after a deployed unit levels up mid-run, so its already-spawned
+-- model's Damage/MaxHealth catch up immediately instead of only updating on
+-- the next Deploy (stats are otherwise computed once, at spawn/Register time).
+function UnitFollowService.RefreshLevelStats(unit: Model)
+	local registration = registrations[unit]
+	if not registration then
+		return
+	end
+
+	local unitId = unit:GetAttribute("UnitId")
+	local definition = if typeof(unitId) == "string" then UnitDatabase.GetById(unitId) else nil
+	local archetype = definition and UnitConfig.GetArchetype(definition.Archetype)
+	local rarityMultiplier = definition and UnitConfig.GetRarityMultiplier(definition.Rarity)
+	if not (archetype and rarityMultiplier) then
+		return
+	end
+
+	local stats = UnitConfig.ApplyMultipliers(
+		archetype,
+		rarityMultiplier,
+		nil,
+		levelMultipliers(registration.ownerUserId, unit:GetAttribute("InstanceId"))
+	)
+
+	registration.power = stats.Damage
+
+	local humanoid = registration.humanoid
+	if humanoid.Parent then
+		-- Preserve the absolute HP already lost, rather than a free full heal
+		-- or leaving it proportionally more hurt against the new, higher cap.
+		local delta = stats.MaxHealth - humanoid.MaxHealth
+		humanoid.MaxHealth = stats.MaxHealth
+		humanoid.Health = math.clamp(humanoid.Health + delta, 0, humanoid.MaxHealth)
+	end
 end
 
 function UnitFollowService.Unregister(unit: Model)

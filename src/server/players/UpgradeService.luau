@@ -58,7 +58,7 @@ function UpgradeService.GetNextGoldCost(player: Player, id: UpgradeConfig.Upgrad
 	if level >= curve.MaxLevel then
 		return nil
 	end
-	return UpgradeCurve.GoldCost(curve, level + 1)
+	return UpgradeCurve.Cost(curve, level + 1)
 end
 
 -- Spends Gold and bumps the level by one. Returns (false, reason) on failure.
@@ -78,7 +78,7 @@ function UpgradeService.TryPurchaseWithGold(player: Player, id: UpgradeConfig.Up
 		return false, "max_level"
 	end
 
-	local cost = UpgradeCurve.GoldCost(curve, level + 1)
+	local cost = UpgradeCurve.Cost(curve, level + 1)
 	if not CurrencyService.TrySpendGold(player, cost) then
 		return false, "insufficient_gold"
 	end

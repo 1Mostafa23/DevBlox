@@ -19,6 +19,21 @@ type RunContext = RunContextModule.RunContext
 local UnitModels = ServerStorage:WaitForChild("UnitModels")
 
 local UnitFollowService = require(script.Parent.Parent.units.UnitFollowService)
+local UnitLevelService = require(script.Parent.Parent.players.UnitLevelService)
+
+-- Builds the StatMultipliers CombatArchetypes.ApplyMultipliers expects from a
+-- unit-level power scalar -- level only buffs MaxHealth/Damage (see
+-- UnitLevelConfig.luau), everything else stays at identity.
+local function levelMultipliers(player: Player, instanceId: string): UnitConfig.StatMultipliers
+	local power = UnitLevelService.GetPowerMultiplier(player, instanceId)
+	return {
+		MaxHealth = power,
+		WalkSpeed = 1,
+		Damage = power,
+		AttackCooldown = 1,
+		AttackRange = 1,
+	}
+end
 
 -- Tag consumed by client/UnitBillboardScale.client.luau so it keeps shrinking with
 -- distance in proportion to the unit itself, instead of holding Roblox's default
@@ -369,7 +384,7 @@ function UnitSpawner.RestoreAllForNextRun(context: RunContext)
 			local archetype = config and UnitConfig.GetArchetype(config.Archetype)
 			local rarity = config and UnitConfig.GetRarityMultiplier(config.Rarity)
 			if archetype and rarity then
-				local stats = UnitConfig.ApplyMultipliers(archetype, rarity)
+				local stats = UnitConfig.ApplyMultipliers(archetype, rarity, nil, levelMultipliers(player, instanceId))
 				UnitFollowService.Unregister(model)
 				local _, size = model:GetBoundingBox()
 				local homeCFrame = clampHomeCFrame(
@@ -435,7 +450,7 @@ spawnUnit = function(
 		warn(`UnitSpawner: unknown archetype {config.Archetype} for unit {unitId}`)
 		return nil
 	end
-	local stats = UnitConfig.ApplyMultipliers(archetypeConfig, rarityMultiplier)
+	local stats = UnitConfig.ApplyMultipliers(archetypeConfig, rarityMultiplier, nil, levelMultipliers(player, instanceId))
 	local template = UnitModels:FindFirstChild(config.ModelName)
 	if not template or not template:IsA("Model") then
 		warn("UnitSpawner: no model named " .. config.ModelName)
@@ -546,6 +561,14 @@ function UnitSpawner.UpdateHomeRotation(player: Player, instanceId: string, rota
 		model:PivotTo(rotatedHome)
 	end
 	return true
+end
+
+-- The live model for a deployed unit, if it currently has one. Used to push
+-- a level-up's new stats onto an already-spawned model immediately, instead
+-- of waiting for the next Deploy.
+function UnitSpawner.GetDeployedModel(player: Player, instanceId: string): Model?
+	local playerUnits = deployed[player]
+	return playerUnits and playerUnits[instanceId]
 end
 
 -- Removes a specific deployed unit. Pass silent=true to skip the poof.

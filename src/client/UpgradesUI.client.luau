@@ -407,7 +407,7 @@ local function buildCard(id: UpgradeConfig.UpgradeId, order: number)
 			return
 		end
 
-		local goldCost = UpgradeCurve.GoldCost(definition, level + 1)
+		local goldCost = UpgradeCurve.Cost(definition, level + 1)
 		local playerGold = player:GetAttribute("Gold")
 		local canAfford = typeof(playerGold) == "number" and playerGold >= goldCost
 		goldLabel.Text = `${goldCost}`
