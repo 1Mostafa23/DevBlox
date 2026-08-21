@@ -21,6 +21,17 @@ local GetInventory = RemotesFolder:WaitForChild("GetInventory") :: RemoteFunctio
 local LevelUpUnit = RemotesFolder:WaitForChild("LevelUpUnit") :: RemoteFunction
 local SalvageUnit = RemotesFolder:WaitForChild("SalvageUnit") :: RemoteFunction
 
+local FeedbackToast = require(script.Parent:WaitForChild("FeedbackToast"))
+local GlassPanel = require(script.Parent:WaitForChild("GlassPanel"))
+local UISounds = require(script.Parent:WaitForChild("UISounds"))
+local ButtonFeedback = require(script.Parent:WaitForChild("ButtonFeedback"))
+
+local UPGRADE_FAILURE_MESSAGES: { [string]: string } = {
+	insufficient_shards = "Not enough shards!",
+	max_level = "Already at max level.",
+	not_owned = "You don't own that unit.",
+}
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -41,39 +52,18 @@ end
 -- actually call it.
 local renderList: (() -> ())? = nil
 local refresh: (() -> ())? = nil
+local dissolveDetailView: ((onComplete: () -> ()) -> ())? = nil
 
 -- =========================================================
 -- HOVER / PRESS FEEDBACK
 -- =========================================================
--- A UIScale (not Size!) is what gets tweened -- Size is what UIListLayout and
--- UIGridLayout read to position/arrange siblings, so animating it directly
--- would make neighboring buttons/cards jitter as the row/grid re-flows around
--- the animating one. UIScale is a purely visual multiplier the layouts never
--- look at, so it's safe everywhere, not just inside a layout.
-local function addButtonFeedback(button: GuiButton)
-	local scale = Instance.new("UIScale")
-	scale.Scale = 1
-	scale.Parent = button
+-- Generic button hover/press (UIScale + sound) now lives in the shared
+-- ButtonFeedback module so UpgradesUI can use the exact same treatment
+-- instead of a second copy. addCardHoverLift below stays local -- it's
+-- bespoke to grid cards (the hover target is an invisible overlay button,
+-- not the animated object itself).
 
-	local function animateTo(target: number, style: Enum.EasingStyle, duration: number)
-		TweenService:Create(scale, TweenInfo.new(duration, style, Enum.EasingDirection.Out), { Scale = target }):Play()
-	end
-
-	button.MouseEnter:Connect(function()
-		animateTo(1.06, Enum.EasingStyle.Back, 0.12)
-	end)
-	button.MouseLeave:Connect(function()
-		animateTo(1, Enum.EasingStyle.Quad, 0.12)
-	end)
-	button.MouseButton1Down:Connect(function()
-		animateTo(0.94, Enum.EasingStyle.Quad, 0.08)
-	end)
-	button.MouseButton1Up:Connect(function()
-		animateTo(1.06, Enum.EasingStyle.Back, 0.12)
-	end)
-end
-
--- Same idea as addButtonFeedback, but for a grid CARD: the card itself has no
+-- Same idea as ButtonFeedback.Add, but for a grid CARD: the card itself has no
 -- button/input handling (the invisible clickBtn on top of it does), so the
 -- hover events come from clickBtn while the UIScale that actually animates
 -- lives on card. Also nudges ZIndex up so the enlarged card renders over its
@@ -88,6 +78,7 @@ local function addCardHoverLift(card: Frame, hitButton: TextButton)
 	hitButton.MouseEnter:Connect(function()
 		card.ZIndex = baseZIndex + 3
 		TweenService:Create(scale, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1.06 }):Play()
+		UISounds.Play("Hover")
 	end)
 	hitButton.MouseLeave:Connect(function()
 		card.ZIndex = baseZIndex
@@ -126,7 +117,7 @@ local openButtonCorner = Instance.new("UICorner")
 openButtonCorner.CornerRadius = UDim.new(0, 8)
 openButtonCorner.Parent = openBtn
 
-addButtonFeedback(openBtn)
+ButtonFeedback.Add(openBtn)
 
 -- =========================================================
 -- MAIN PANEL
@@ -141,6 +132,7 @@ panel.Size = PANEL_SIZE
 panel.Position = UDim2.fromScale(0.5, 0.5)
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+panel.BackgroundTransparency = 0.08 -- a touch of glass; kept low so a panel this text-dense stays legible
 panel.BorderSizePixel = 0
 panel.ClipsDescendants = true
 panel.Visible = false
@@ -149,6 +141,8 @@ panel.Parent = screen
 local panelCorner = Instance.new("UICorner")
 panelCorner.CornerRadius = UDim.new(0, 12)
 panelCorner.Parent = panel
+
+GlassPanel.Apply(panel, nil, 0.1, 0.3)
 
 -- Grows in from 85% scale (Back/Out, a slight overshoot) on open; shrinks
 -- back down before actually hiding on close. Always resets Size to the
@@ -211,7 +205,7 @@ local closeButtonCorner = Instance.new("UICorner")
 closeButtonCorner.CornerRadius = UDim.new(0, 8)
 closeButtonCorner.Parent = closeBtn
 
-addButtonFeedback(closeBtn)
+ButtonFeedback.Add(closeBtn)
 
 -- =========================================================
 -- SALVAGE CONFIRM POPUP (panel-level modal, reused everywhere)
@@ -240,6 +234,8 @@ confirmBox.Parent = confirmOverlay
 local confirmBoxCorner = Instance.new("UICorner")
 confirmBoxCorner.CornerRadius = UDim.new(0, 12)
 confirmBoxCorner.Parent = confirmBox
+
+GlassPanel.Apply(confirmBox, nil, 0.1, 0.3)
 
 local confirmText = Instance.new("TextLabel")
 confirmText.Name = "ConfirmText"
@@ -287,8 +283,8 @@ local confirmNoCorner = Instance.new("UICorner")
 confirmNoCorner.CornerRadius = UDim.new(0, 8)
 confirmNoCorner.Parent = confirmNoBtn
 
-addButtonFeedback(confirmYesBtn)
-addButtonFeedback(confirmNoBtn)
+ButtonFeedback.Add(confirmYesBtn)
+ButtonFeedback.Add(confirmNoBtn)
 
 local pendingSalvageInstanceId: string? = nil
 
@@ -313,12 +309,33 @@ confirmYesBtn.MouseButton1Click:Connect(function()
 	local result = SalvageUnit:InvokeServer(instanceId)
 	if not result.ok then
 		warn(`Salvage failed ({instanceId}): {tostring(result.reason)}`)
+		if showGrid then
+			showGrid()
+		end
+		if refresh then
+			refresh()
+		end
+		return
 	end
-	if showGrid then
-		showGrid()
+
+	UISounds.Play("Salvage")
+
+	local function backToGrid()
+		if showGrid then
+			showGrid()
+		end
+		if refresh then
+			refresh()
+		end
 	end
-	if refresh then
-		refresh()
+
+	-- The unit is genuinely gone -- give the permanence some visual weight
+	-- (shrink + fade the whole detail view) instead of just cutting back to
+	-- the grid instantly.
+	if dissolveDetailView then
+		dissolveDetailView(backToGrid)
+	else
+		backToGrid()
 	end
 end)
 
@@ -356,7 +373,7 @@ sortButtonPadding.PaddingLeft = UDim.new(0, 6)
 sortButtonPadding.PaddingRight = UDim.new(0, 6)
 sortButtonPadding.Parent = sortButton
 
-addButtonFeedback(sortButton)
+ButtonFeedback.Add(sortButton)
 
 -- Dropdown list of sort options, opens beneath the sort button.
 local sortOptions = Instance.new("Frame")
@@ -484,14 +501,45 @@ layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(
 -- and reconnected each time so they always act on the currently-shown unit.
 -- =========================================================
 
-local detailView = Instance.new("Frame")
+-- CanvasGroup (not Frame): its GroupTransparency composites every descendant
+-- into one fade instead of needing to tween each label/button/viewport's own
+-- transparency separately -- that's what makes the salvage "dissolve" a
+-- single two-line tween instead of a dozen.
+local detailView = Instance.new("CanvasGroup")
 detailView.Name = "DetailView"
 detailView.Position = CONTENT_POSITION
 detailView.Size = CONTENT_SIZE
 detailView.BackgroundTransparency = 1
+detailView.GroupTransparency = 0
 detailView.Visible = false
 detailView.ZIndex = 1
 detailView.Parent = panel
+
+local detailViewScale = Instance.new("UIScale")
+detailViewScale.Scale = 1
+detailViewScale.Parent = detailView
+
+-- Shrink + fade the whole detail view, then reset it back to normal (so the
+-- next unit opened doesn't inherit the faded/shrunk state) and hand control
+-- back to the caller.
+dissolveDetailView = function(onComplete: () -> ())
+	local fadeTween = TweenService:Create(
+		detailView,
+		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{ GroupTransparency = 1 }
+	)
+	TweenService:Create(
+		detailViewScale,
+		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{ Scale = 0.8 }
+	):Play()
+	fadeTween.Completed:Connect(function()
+		detailView.GroupTransparency = 0
+		detailViewScale.Scale = 1
+		onComplete()
+	end)
+	fadeTween:Play()
+end
 
 local backBtn = Instance.new("TextButton")
 backBtn.Name = "BackButton"
@@ -510,7 +558,7 @@ local backBtnCorner = Instance.new("UICorner")
 backBtnCorner.CornerRadius = UDim.new(0, 8)
 backBtnCorner.Parent = backBtn
 
-addButtonFeedback(backBtn)
+ButtonFeedback.Add(backBtn)
 
 local detailName = Instance.new("TextLabel")
 detailName.Name = "DetailName"
@@ -585,7 +633,7 @@ local function createDetailButton(order: number, text: string, color: Color3): T
 	corner.CornerRadius = UDim.new(0, 8)
 	corner.Parent = btn
 
-	addButtonFeedback(btn)
+	ButtonFeedback.Add(btn)
 
 	return btn
 end
@@ -729,6 +777,52 @@ local function flashLevelUp()
 		}):Play()
 	end)
 	flash:Play()
+end
+
+-- Floating "+1 LEVEL!" over the viewport, same rise-then-fade rhythm as
+-- FloatingDamageNumber.luau's combat text -- can't reuse that module directly
+-- since it anchors a world-space BillboardGui to a Workspace part, and this
+-- needs to render inside a 2D ViewportFrame overlay instead, but the pop/
+-- rise/fade beats are deliberately the same feel.
+local function spawnLevelUpCelebration()
+	local popup = Instance.new("TextLabel")
+	popup.Name = "LevelUpCelebration"
+	popup.AnchorPoint = Vector2.new(0.5, 0.5)
+	popup.Position = UDim2.new(0.5, 0, 0.55, 0)
+	popup.Size = UDim2.fromOffset(220, 44)
+	popup.BackgroundTransparency = 1
+	popup.Font = Enum.Font.GothamBlack
+	popup.TextScaled = true
+	popup.TextColor3 = Color3.fromRGB(255, 215, 60)
+	popup.TextStrokeColor3 = Color3.new(0, 0, 0)
+	popup.TextStrokeTransparency = 0
+	popup.Text = "+1 LEVEL!"
+	popup.ZIndex = 5
+	popup.Parent = detailViewport
+
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.5
+	scale.Parent = popup
+	TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+
+	local riseTween = TweenService:Create(
+		popup,
+		TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Position = UDim2.new(0.5, 0, 0.1, 0) }
+	)
+	riseTween:Play()
+	riseTween.Completed:Connect(function()
+		popup:Destroy()
+	end)
+
+	task.delay(0.5, function()
+		if popup.Parent then
+			TweenService:Create(popup, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				TextTransparency = 1,
+				TextStrokeTransparency = 1,
+			}):Play()
+		end
+	end)
 end
 
 -- Spin state for the detail viewport's model, driven by the same
@@ -875,6 +969,7 @@ local function populateDetailView(entry: any, config: any)
 			local result = LevelUpUnit:InvokeServer(entry.instanceId)
 			if not result.ok then
 				warn(`Upgrade failed ({entry.instanceId}): {tostring(result.reason)}`)
+				FeedbackToast.Show(UPGRADE_FAILURE_MESSAGES[tostring(result.reason)] or "Can't upgrade right now.")
 				return
 			end
 
@@ -887,6 +982,8 @@ local function populateDetailView(entry: any, config: any)
 			refreshShardBalance()
 			if result.leveledUp then
 				flashLevelUp()
+				spawnLevelUpCelebration()
+				UISounds.Play("LevelUp")
 			end
 
 			if nowMaxed then
@@ -1051,6 +1148,24 @@ local function makeCard(entry: any, layoutOrder: number)
 	stroke.Color = rarity.Color
 	stroke.Thickness = 3
 	stroke.Parent = card
+
+	-- Legendary/Mythic pulse: a slow breathing glow so a rare pull announces
+	-- itself in the grid at a glance, not just via border color. Mythic pulses
+	-- faster/harder than Legendary to feel like the bigger deal it is.
+	if config.Rarity == "Legendary" or config.Rarity == "Mythic" then
+		local isMythic = config.Rarity == "Mythic"
+		local pulseInfo = TweenInfo.new(
+			if isMythic then 0.55 else 0.9,
+			Enum.EasingStyle.Sine,
+			Enum.EasingDirection.InOut,
+			-1, -- loop forever
+			true -- reverse back down instead of snapping
+		)
+		TweenService:Create(stroke, pulseInfo, {
+			Thickness = if isMythic then 6 else 5,
+			Transparency = if isMythic then 0.55 else 0.4,
+		}):Play()
+	end
 
 	-- Unit name.
 	local nameLabel = Instance.new("TextLabel")

@@ -17,6 +17,16 @@ require(Shared.Remotes)
 local RemotesFolder = Shared:WaitForChild("Remotes")
 local RequestUpgrade = RemotesFolder:WaitForChild("RequestUpgrade") :: RemoteFunction
 
+local FeedbackToast = require(script.Parent:WaitForChild("FeedbackToast"))
+local GlassPanel = require(script.Parent:WaitForChild("GlassPanel"))
+local UISounds = require(script.Parent:WaitForChild("UISounds"))
+local ButtonFeedback = require(script.Parent:WaitForChild("ButtonFeedback"))
+
+local PURCHASE_FAILURE_MESSAGES: { [string]: string } = {
+	insufficient_gold = "Not enough gold!",
+	max_level = "Already at max level.",
+}
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -64,6 +74,8 @@ openButtonStroke.Transparency = 0.35
 openButtonStroke.Thickness = 2
 openButtonStroke.Parent = openBtn
 
+ButtonFeedback.Add(openBtn)
+
 -- =========================================================
 -- MAIN PANEL
 -- =========================================================
@@ -83,11 +95,7 @@ local panelCorner = Instance.new("UICorner")
 panelCorner.CornerRadius = UDim.new(0, 16)
 panelCorner.Parent = panel
 
-local panelStroke = Instance.new("UIStroke")
-panelStroke.Color = Color3.fromRGB(255, 255, 255)
-panelStroke.Transparency = 0.85
-panelStroke.Thickness = 1
-panelStroke.Parent = panel
+GlassPanel.Apply(panel, 0.85, 0.1, 0.3)
 
 -- =========================================================
 -- HEADER
@@ -130,6 +138,8 @@ closeBtn.Parent = header
 local closeButtonCorner = Instance.new("UICorner")
 closeButtonCorner.CornerRadius = UDim.new(1, 0)
 closeButtonCorner.Parent = closeBtn
+
+ButtonFeedback.Add(closeBtn)
 
 -- =========================================================
 -- 2x2 CARD GRID
@@ -258,6 +268,8 @@ local function createCostButton(order: number, parent: Instance, tint: Color3): 
 	labelConstraint.MaxTextSize = 16
 	labelConstraint.Parent = label
 
+	ButtonFeedback.Add(btn)
+
 	return btn, label
 end
 
@@ -281,6 +293,10 @@ local function buildCard(id: UpgradeConfig.UpgradeId, order: number)
 	cardStroke.Transparency = 0.4
 	cardStroke.Thickness = 2
 	cardStroke.Parent = card
+
+	-- Sheen only (not AddStroke -- the tinted stroke above already identifies
+	-- the upgrade; a second white one would just compete with it).
+	GlassPanel.AddSheen(card, 0.1, 0.3)
 
 	local cardPadding = Instance.new("UIPadding")
 	cardPadding.PaddingTop = UDim.new(0, 10)
@@ -428,6 +444,7 @@ local function buildCard(id: UpgradeConfig.UpgradeId, order: number)
 		local result = RequestUpgrade:InvokeServer(id)
 		if not result.ok then
 			warn(`Upgrade purchase failed ({id}): {tostring(result.reason)}`)
+			FeedbackToast.Show(PURCHASE_FAILURE_MESSAGES[tostring(result.reason)] or "Can't buy that upgrade right now.")
 		end
 		-- Level display refreshes itself via the Upgrade_<id> attribute changing.
 	end)

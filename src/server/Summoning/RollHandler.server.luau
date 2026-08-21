@@ -12,6 +12,7 @@ require(Shared.Remotes)
 local RemotesFolder = Shared:WaitForChild("Remotes")
 local RequestRoll = RemotesFolder:WaitForChild("RequestRoll") :: RemoteFunction
 local ResolveRoll = RemotesFolder:WaitForChild("ResolveRoll") :: RemoteEvent
+local ClaimFeedback = RemotesFolder:WaitForChild("ClaimFeedback") :: RemoteEvent
 local InventoryService = require(script.Parent.Parent.Data.InventoryService)
 local CurrencyService = require(script.Parent.Parent.players.CurrencyService)
 local UpgradeService = require(script.Parent.Parent.players.UpgradeService)
@@ -21,20 +22,29 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 
 -- Spends the unit's essence cost (by its rarity) and adds it to the inventory
 -- only if the player can afford it. Returns whether the claim went through.
+-- Fires ClaimFeedback on every failure so the client can show why, since both
+-- callers below (the prompt trigger and the ResolveRoll RemoteEvent) are
+-- one-way and would otherwise fail completely silently.
 local function tryClaim(player: Player, unitId: string): boolean
 	local definition = UnitDatabase.GetById(unitId)
-	if not definition then return false end
+	if not definition then
+		ClaimFeedback:FireClient(player, "bad_unit")
+		return false
+	end
 
 	local owned = 0
 	for _ in InventoryService.GetUnits(player) do
 		owned += 1
 	end
 	if owned >= UpgradeService.GetEffect(player, "Inventory") then
-		return false -- inventory full; leave the pending roll intact so they can retry after freeing space
+		-- inventory full; leave the pending roll intact so they can retry after freeing space
+		ClaimFeedback:FireClient(player, "inventory_full")
+		return false
 	end
 
 	local cost = (CurrencyConfig.ClaimCostEssence :: { [string]: number })[definition.Rarity]
 	if not cost or not CurrencyService.TrySpendEssence(player, cost) then
+		ClaimFeedback:FireClient(player, "insufficient_essence")
 		return false
 	end
 
