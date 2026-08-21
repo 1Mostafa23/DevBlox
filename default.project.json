@@ -6,6 +6,60 @@
     "ReplicatedStorage": {
       "Shared": {
         "$path": "src/shared"
+      },
+      "WeaponPreviews": {
+        "$className": "Folder",
+        "BasicSword": {
+          "$className": "Model",
+          "Blade": {
+            "$className": "MeshPart",
+            "$properties": {
+              "Anchored": true,
+              "CanCollide": false,
+              "CanQuery": false,
+              "CanTouch": false,
+              "CastShadow": false,
+              "Color": [0.639216, 0.635294, 0.647059],
+              "CFrame": [-0.0241928, 0.865591, 4.662285, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+              "Material": "Plastic",
+              "MeshId": "rbxassetid://79568108343574",
+              "Size": [0.38640246, 2.1468906, 6.443835],
+              "TextureID": "rbxassetid://138591377870007"
+            }
+          },
+          "Guard": {
+            "$className": "MeshPart",
+            "$properties": {
+              "Anchored": true,
+              "CanCollide": false,
+              "CanQuery": false,
+              "CanTouch": false,
+              "CastShadow": false,
+              "Color": [0.639216, 0.635294, 0.647059],
+              "CFrame": [-0.0003204, 0.158152, 0.207649, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+              "Material": "Plastic",
+              "MeshId": "rbxassetid://87549527330710",
+              "Size": [0.45329493, 2.7983434, 3.3671541],
+              "TextureID": "rbxassetid://138591377870007"
+            }
+          },
+          "Handle": {
+            "$className": "MeshPart",
+            "$properties": {
+              "Anchored": true,
+              "CanCollide": false,
+              "CanQuery": false,
+              "CanTouch": false,
+              "CastShadow": false,
+              "Color": [0.639216, 0.635294, 0.647059],
+              "CFrame": [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+              "Material": "Plastic",
+              "MeshId": "rbxassetid://110110908979083",
+              "Size": [0.30180386, 0.9005984, 2.9936824],
+              "TextureID": "rbxassetid://138591377870007"
+            }
+          }
+        }
       }
     },
 

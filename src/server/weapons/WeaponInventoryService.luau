@@ -52,6 +52,22 @@ function WeaponInventoryService.OwnsWeapon(player: Player, weaponId: string): bo
 	return profile.Data.Weapons.Owned[weaponId] == true
 end
 
+function WeaponInventoryService.GetOwnedWeaponIds(player: Player): { string }?
+	local profile = PlayerDataService.WaitForProfile(player, 5)
+	if not profile then
+		return nil
+	end
+
+	local weaponIds: { string } = {}
+	for weaponId, isOwned in profile.Data.Weapons.Owned do
+		if typeof(weaponId) == "string" and isOwned == true then
+			table.insert(weaponIds, weaponId)
+		end
+	end
+	table.sort(weaponIds)
+	return weaponIds
+end
+
 function WeaponInventoryService.AddWeapon(player: Player, weaponId: string): boolean
 	local profile = PlayerDataService.GetProfile(player)
 	if not profile or profile.Data.Weapons.Owned[weaponId] then
